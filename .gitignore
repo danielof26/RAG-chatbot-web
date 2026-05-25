@@ -15,8 +15,9 @@ frontend/dist/
 frontend/dist-ssr/
 *.local
 
-uploads/        
+uploads/
 vectorstore/
+chromadb_data/
 *.faiss
 
 .DS_Store

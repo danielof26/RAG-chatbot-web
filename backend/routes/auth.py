@@ -1,15 +1,12 @@
 # backend/routes/auth.py
 from flask import Blueprint, request, jsonify
-from pymongo import MongoClient
 from datetime import datetime, timedelta, timezone
 import bcrypt
 import jwt
 import config
+from db import users_col as users
 
 auth_bp = Blueprint('auth', __name__)
-client = MongoClient(config.MONGO_URI)
-db = client.get_default_database()
-users = db['users']
 
 
 @auth_bp.route('/api/register', methods=['POST'])
