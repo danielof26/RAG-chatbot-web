@@ -1,33 +1,28 @@
-# ─── Python / Flask ───────────────────────────
 backend/venv/
+backend/config.py
 __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
 instance/
 
-# ─── Variables de entorno (claves API, etc.) ──
 .env
 .env.*
-!.env.example        # este sí se sube como plantilla
+!.env.example     
 
-# ─── React / Node ─────────────────────────────
 frontend/node_modules/
 frontend/dist/
 frontend/dist-ssr/
 *.local
 
-# ─── RAG (cuando llegues a esa parte) ─────────
-uploads/             # documentos subidos por el usuario
-vectorstore/         # base de datos de embeddings (ChromaDB, FAISS...)
+uploads/        
+vectorstore/
 *.faiss
 
-# ─── macOS / Editor ───────────────────────────
 .DS_Store
 .vscode/*
 !.vscode/extensions.json
 .idea/
 
-# ─── Logs ─────────────────────────────────────
 *.log
 logs/
