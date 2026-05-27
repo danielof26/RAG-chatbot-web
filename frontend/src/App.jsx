@@ -1,21 +1,25 @@
-import { useState } from 'react'
+// src/App.jsx
+import { Routes, Route, Navigate } from 'react-router-dom'
+import Login from './pages/Login'
+import Agents from './pages/Agents'
+import AgentDetail from './pages/AgentDetail'
+import PrivateRoute from './components/PrivateRoute'
 
-function App() {
-  const [mensaje, setMensaje] = useState('')
-
-  const llamarBackend = async () => {
-    const res = await fetch('/api/hello')
-    const data = await res.json()
-    setMensaje(data.message)
-  }
-
+export default function App() {
   return (
-    <div>
-      <h1>RAG Chatbot 🤖</h1>
-      <button onClick={llamarBackend}>Llamar al backend</button>
-      {mensaje && <p>Respuesta: {mensaje}</p>}
-    </div>
+    <Routes>
+      <Route path="/login" element={<Login />} />
+
+      <Route path="/agents" element={
+        <PrivateRoute><Agents /></PrivateRoute>
+      } />
+
+      <Route path="/agents/:id" element={
+        <PrivateRoute><AgentDetail /></PrivateRoute>
+      } />
+
+      {/* Redirige la raíz al login */}
+      <Route path="*" element={<Navigate to="/login" replace />} />
+    </Routes>
   )
 }
-
-export default App
