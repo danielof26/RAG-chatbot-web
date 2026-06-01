@@ -43,6 +43,7 @@ export default function Agents() {
 
     const data = await res.json()
     setCreating(false)
+    if (!res.ok) return
     setNewName('')
     setShowForm(false)
     navigate(`/agents/${data._id}`)

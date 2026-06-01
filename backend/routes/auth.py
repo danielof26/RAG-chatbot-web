@@ -42,7 +42,7 @@ def register():
 def login():
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'Body JSON requerido'}), 400
+        return jsonify({'error': 'Body JSON required'}), 400
 
     email = data.get('email', '').lower().strip()
     password = data.get('password', '')

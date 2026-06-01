@@ -59,7 +59,7 @@ def query_agent(agent_id: str, question: str, agent_config: dict) -> str:
     chroma_collection, vector_store, storage_context = _get_chroma_store(agent_id)
 
     if chroma_collection.count() == 0:
-        return "This agent has no knowdledge documents de yet. Upload a document first."
+        return "This agent has no knowledge documents yet. Upload a document first."
 
     top_k = agent_config.get('rag_config', {}).get('similarity_top_k', 5)
 
@@ -70,6 +70,32 @@ def query_agent(agent_id: str, question: str, agent_config: dict) -> str:
     query_engine = index.as_query_engine(similarity_top_k=top_k)
     response = query_engine.query(question)
     return str(response).strip()
+
+
+def stream_query_agent(agent_id: str, question: str, agent_config: dict):
+    """
+    Generador que cede tokens uno a uno para modo streaming.
+    El caller itera sobre él para construir la respuesta progresivamente.
+    """
+    _setup_settings(agent_config)
+
+    chroma_collection, vector_store, storage_context = _get_chroma_store(agent_id)
+
+    if chroma_collection.count() == 0:
+        yield "This agent has no knowledge documents yet. Upload a document first."
+        return
+
+    top_k = agent_config.get('rag_config', {}).get('similarity_top_k', 5)
+
+    index = VectorStoreIndex.from_vector_store(
+        vector_store,
+        storage_context=storage_context
+    )
+    query_engine = index.as_query_engine(similarity_top_k=top_k, streaming=True)
+    streaming_response = query_engine.query(question)
+
+    for token in streaming_response.response_gen:
+        yield token
 
 
 def delete_agent_collection(agent_id: str):

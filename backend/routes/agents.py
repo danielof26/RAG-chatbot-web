@@ -119,7 +119,7 @@ def delete_agent(agent_id):
     if not agent:
         return jsonify({'error': 'Agent not found'}), 404
 
-    delete_agent_collection(agent_id)   # borra vectores de ChromaDB
+    delete_agent_collection(agent_id)
     agents_col.delete_one({'_id': ObjectId(agent_id)})
     return jsonify({'message': 'Agent deleted'}), 200
 

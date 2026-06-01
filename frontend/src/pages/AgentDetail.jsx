@@ -39,6 +39,10 @@ export default function AgentDetail() {
     const res = await fetch(`/api/agents/${id}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     })
+    if (!res.ok) {
+      navigate('/agents')
+      return
+    }
     const data = await res.json()
     setAgent(data)
     setName(data.name || '')
@@ -94,7 +98,7 @@ export default function AgentDetail() {
     const data = await res.json()
     setUploading(false)
     setUploadMsg(res.ok ? data.message : data.error)
-    if (res.ok) fetchAgent()
+    if (res.ok) await fetchAgent()
     fileRef.current.value = ''
   }
 
