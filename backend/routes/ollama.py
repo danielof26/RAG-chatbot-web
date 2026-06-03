@@ -7,6 +7,9 @@ from services.rag_service import query_agent, stream_query_agent
 
 ollama_bp = Blueprint('ollama', __name__)
 
+AGENT_NOT_FOUND = 'Agent not found'
+DEFAULT_MODEL = 'llama3.2:3b'
+
 
 def _get_agent(agent_id):
     try:
@@ -15,13 +18,33 @@ def _get_agent(agent_id):
         return None
 
 
+# ─── List models (requerido por n8n para "Test connection") ──
+
+@ollama_bp.route('/<agent_id>/api/tags', methods=['GET'])
+def tags(agent_id):
+    agent = _get_agent(agent_id)
+    if not agent:
+        return jsonify({'error': AGENT_NOT_FOUND}), 404
+
+    model = agent.get('llm_model', DEFAULT_MODEL)
+
+    return jsonify({
+        'models': [{
+            'name': model,
+            'model': model,
+            'modified_at': datetime.now(timezone.utc).isoformat(),
+            'size': 0
+        }]
+    })
+
+
 # ─── Generate a completion ───────────────────────────────
 
 @ollama_bp.route('/<agent_id>/api/generate', methods=['POST'])
 def generate(agent_id):
     agent = _get_agent(agent_id)
     if not agent:
-        return jsonify({'error': 'Agent not found'}), 404
+        return jsonify({'error': AGENT_NOT_FOUND}), 404
 
     data = request.get_json(force=True, silent=True)
     if not data:
@@ -32,7 +55,7 @@ def generate(agent_id):
         return jsonify({'error': 'prompt is required'}), 400
 
     stream = data.get('stream', True)  # por defecto streaming, igual que Ollama
-    model = agent.get('llm_model', 'llama3.2:3b')
+    model = agent.get('llm_model', DEFAULT_MODEL)
 
     if stream:
         def generate_stream():
@@ -82,7 +105,7 @@ def generate(agent_id):
 def chat(agent_id):
     agent = _get_agent(agent_id)
     if not agent:
-        return jsonify({'error': 'Agent not found'}), 404
+        return jsonify({'error': AGENT_NOT_FOUND}), 404
 
     data = request.get_json(force=True, silent=True)
     if not data:
@@ -101,7 +124,7 @@ def chat(agent_id):
         return jsonify({'error': 'No user message found'}), 400
 
     stream = data.get('stream', True)
-    model = agent.get('llm_model', 'llama3.2:3b')
+    model = agent.get('llm_model', DEFAULT_MODEL)
 
     if stream:
         def generate_stream():
