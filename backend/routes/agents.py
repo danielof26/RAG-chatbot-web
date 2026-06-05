@@ -2,12 +2,36 @@ from flask import Blueprint, request, jsonify
 from bson import ObjectId
 from datetime import datetime, timezone
 import os
+import threading
 from db import agents_col
 from middleware.auth_middleware import token_required
 from services.rag_service import index_document, query_agent, delete_agent_collection
 import config
 
 agents_bp = Blueprint('agents', __name__)
+
+DOC_FILENAME    = 'documents.filename'
+DOC_STATUS      = 'documents.$.status'
+INVALID_ID      = 'Invalid ID agent'
+AGENT_NOT_FOUND = 'Agent not found'
+
+
+def _index_in_background(agent_id, file_path, embed_model, filename):
+    try:
+        agents_col.update_one(
+            {'_id': ObjectId(agent_id), DOC_FILENAME: filename},
+            {'$set': {DOC_STATUS: 'indexing'}}
+        )
+        index_document(agent_id, file_path, embed_model=embed_model)
+        agents_col.update_one(
+            {'_id': ObjectId(agent_id), DOC_FILENAME: filename},
+            {'$set': {DOC_STATUS: 'indexed'}}
+        )
+    except Exception as e:
+        agents_col.update_one(
+            {'_id': ObjectId(agent_id), DOC_FILENAME: filename},
+            {'$set': {DOC_STATUS: 'error', 'documents.$.error': str(e)}}
+        )
 
 
 def _serialize(agent):
@@ -71,10 +95,10 @@ def get_agent(agent_id):
     try:
         agent = agents_col.find_one({'_id': ObjectId(agent_id), 'user_id': request.user_id})
     except Exception:
-        return jsonify({'error': 'Invalid ID agent'}), 400
+        return jsonify({'error': INVALID_ID}), 400
 
     if not agent:
-        return jsonify({'error': 'Agent not found'}), 404
+        return jsonify({'error': AGENT_NOT_FOUND}), 404
     return jsonify(_serialize(agent)), 200
 
 
@@ -99,10 +123,10 @@ def update_agent(agent_id):
             {'$set': updates}
         )
     except Exception:
-        return jsonify({'error': 'Invalid ID agent'}), 400
+        return jsonify({'error': INVALID_ID}), 400
 
     if result.matched_count == 0:
-        return jsonify({'error': 'Agent not found'}), 404
+        return jsonify({'error': AGENT_NOT_FOUND}), 404
 
     agent = agents_col.find_one({'_id': ObjectId(agent_id)})
     return jsonify(_serialize(agent)), 200
@@ -114,10 +138,10 @@ def delete_agent(agent_id):
     try:
         agent = agents_col.find_one({'_id': ObjectId(agent_id), 'user_id': request.user_id})
     except Exception:
-        return jsonify({'error': 'Invalid ID agent'}), 400
+        return jsonify({'error': INVALID_ID}), 400
 
     if not agent:
-        return jsonify({'error': 'Agent not found'}), 404
+        return jsonify({'error': AGENT_NOT_FOUND}), 404
 
     delete_agent_collection(agent_id)
     agents_col.delete_one({'_id': ObjectId(agent_id)})
@@ -132,10 +156,10 @@ def upload_document(agent_id):
     try:
         agent = agents_col.find_one({'_id': ObjectId(agent_id), 'user_id': request.user_id})
     except Exception:
-        return jsonify({'error': 'Invalid ID agent'}), 400
+        return jsonify({'error': INVALID_ID}), 400
 
     if not agent:
-        return jsonify({'error': 'Agent not found'}), 404
+        return jsonify({'error': AGENT_NOT_FOUND}), 404
 
     if 'file' not in request.files:
         return jsonify({'error': 'No document has been uploaded'}), 400
@@ -150,26 +174,49 @@ def upload_document(agent_id):
     file_path = os.path.join(agent_folder, file.filename)
     file.save(file_path)
 
-    # Indexar en ChromaDB
-    try:
-        index_document(agent_id, file_path, embed_model=agent.get('embed_model'))
-    except Exception as e:
-        return jsonify({'error': f'Error at document indexing: {str(e)}'}), 500
-
-    # Guardar metadatos en MongoDB
+    # Guardar metadatos en MongoDB con estado pendiente
     agents_col.update_one(
         {'_id': ObjectId(agent_id)},
         {
             '$push': {'documents': {
                 'filename': file.filename,
                 'file_path': file_path,
-                'uploaded_at': datetime.now(timezone.utc)
+                'uploaded_at': datetime.now(timezone.utc),
+                'status': 'pending'
             }},
             '$set': {'updated_at': datetime.now(timezone.utc)}
         }
     )
 
-    return jsonify({'message': f'Document "{file.filename}" uploaded and indexed correctly'}), 201
+    return jsonify({'message': f'Document "{file.filename}" uploaded. Click Index to generate embeddings.'}), 201
+
+
+@agents_bp.route('/api/agents/<agent_id>/documents/<filename>/index', methods=['POST'])
+@token_required
+def index_document_endpoint(agent_id, filename):
+    try:
+        agent = agents_col.find_one({'_id': ObjectId(agent_id), 'user_id': request.user_id})
+    except Exception:
+        return jsonify({'error': INVALID_ID}), 400
+
+    if not agent:
+        return jsonify({'error': AGENT_NOT_FOUND}), 404
+
+    doc = next((d for d in agent.get('documents', []) if d['filename'] == filename), None)
+    if not doc:
+        return jsonify({'error': 'Document not found'}), 404
+
+    if doc.get('status') == 'indexing':
+        return jsonify({'error': 'Document is already being indexed'}), 409
+
+    thread = threading.Thread(
+        target=_index_in_background,
+        args=(agent_id, doc['file_path'], agent.get('embed_model'), filename),
+        daemon=True
+    )
+    thread.start()
+
+    return jsonify({'message': f'Indexing started for "{filename}"'}), 202
 
 
 # ─── Chat ────────────────────────────────────────────────
@@ -180,10 +227,10 @@ def chat(agent_id):
     try:
         agent = agents_col.find_one({'_id': ObjectId(agent_id), 'user_id': request.user_id})
     except Exception:
-        return jsonify({'error': 'Invalid ID agent'}), 400
+        return jsonify({'error': INVALID_ID}), 400
 
     if not agent:
-        return jsonify({'error': 'Agent not found'}), 404
+        return jsonify({'error': AGENT_NOT_FOUND}), 404
 
     data = request.get_json()
     if not data:

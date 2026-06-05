@@ -14,7 +14,7 @@ def _setup_settings(agent_config: dict):
 
     Settings.llm = Ollama(
         model=llm_model,
-        base_url=config.OLLAMA_LLM_URL,
+        #base_url=config.OLLAMA_LLM_URL,
         request_timeout=600.0,
         system_prompt=system_prompt,
         context_window=8000,

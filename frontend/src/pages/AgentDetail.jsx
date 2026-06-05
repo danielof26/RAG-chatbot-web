@@ -26,6 +26,7 @@ export default function AgentDetail() {
   // Documents
   const [uploading, setUploading] = useState(false)
   const [uploadMsg, setUploadMsg] = useState('')
+  const [indexingMsg, setIndexingMsg] = useState('')
 
   // Chat
   const [question, setQuestion] = useState('')
@@ -33,6 +34,14 @@ export default function AgentDetail() {
   const [chatLoading, setChatLoading] = useState(false)
 
   useEffect(() => { fetchAgent() }, [id])
+
+  // Auto-refresh mientras haya documentos indexando
+  useEffect(() => {
+    const hasIndexing = agent?.documents?.some(d => d.status === 'indexing')
+    if (!hasIndexing) return
+    const interval = setInterval(fetchAgent, 3000)
+    return () => clearInterval(interval)
+  }, [agent])
 
   const fetchAgent = async () => {
     setLoading(true)
@@ -100,6 +109,17 @@ export default function AgentDetail() {
     setUploadMsg(res.ok ? data.message : data.error)
     if (res.ok) await fetchAgent()
     fileRef.current.value = ''
+  }
+
+  const handleIndex = async (filename) => {
+    setIndexingMsg('')
+    const res = await fetch(`/api/agents/${id}/documents/${encodeURIComponent(filename)}/index`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    const data = await res.json()
+    setIndexingMsg(res.ok ? data.message : data.error)
+    if (res.ok) await fetchAgent()
   }
 
   const handleChat = async (e) => {
@@ -235,14 +255,32 @@ export default function AgentDetail() {
               {uploadMsg && <p className="text-sm text-gray-400 mt-2">{uploadMsg}</p>}
             </div>
 
+            {indexingMsg && <p className="text-sm text-gray-400 mb-4">{indexingMsg}</p>}
+
             {agent.documents?.length === 0 ? (
               <p className="text-sm text-gray-300">No documents uploaded yet.</p>
             ) : (
               <div className="space-y-2">
                 {agent.documents?.map((doc, i) => (
-                  <div key={i} className="flex items-center gap-3 border border-gray-100 rounded-lg px-4 py-3">
-                    <span className="text-gray-300">📄</span>
-                    <span className="text-sm text-gray-600">{doc.filename}</span>
+                  <div key={i} className="flex items-center justify-between border border-gray-100 rounded-lg px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <span className="text-gray-300">📄</span>
+                      <span className="text-sm text-gray-600">{doc.filename}</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {doc.status === 'pending'   && <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">Pending</span>}
+                      {doc.status === 'indexing'  && <span className="text-xs text-orange-500 bg-orange-50 px-2 py-1 rounded-full animate-pulse">Indexing...</span>}
+                      {doc.status === 'indexed'   && <span className="text-xs text-green-500 bg-green-50 px-2 py-1 rounded-full">Indexed</span>}
+                      {doc.status === 'error'     && <span className="text-xs text-red-400 bg-red-50 px-2 py-1 rounded-full">Error</span>}
+                      {(doc.status === 'pending' || doc.status === 'error') && (
+                        <button
+                          onClick={() => handleIndex(doc.filename)}
+                          className="text-xs bg-orange-400 hover:bg-orange-500 text-white px-3 py-1 rounded-lg transition"
+                        >
+                          Index
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
