@@ -5,6 +5,7 @@ from flask_cors import CORS
 from routes.auth import auth_bp
 from routes.agents import agents_bp
 from routes.ollama import ollama_bp
+from routes.llm_servers import llm_servers_bp
 
 FRONTEND_DIST = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'dist')
 
@@ -14,6 +15,7 @@ CORS(app)
 app.register_blueprint(auth_bp)
 app.register_blueprint(agents_bp)
 app.register_blueprint(ollama_bp)
+app.register_blueprint(llm_servers_bp)
 
 
 @app.route('/', defaults={'path': ''}, methods=['GET'])

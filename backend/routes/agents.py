@@ -5,7 +5,7 @@ import os
 import threading
 from db import agents_col
 from middleware.auth_middleware import token_required
-from services.rag_service import index_document, query_agent, delete_agent_collection
+from services.rag_service import index_document, query_agent, delete_agent_collection, delete_document_vectors
 import config
 
 agents_bp = Blueprint('agents', __name__)
@@ -109,7 +109,7 @@ def update_agent(agent_id):
     if not data:
         return jsonify({'error': 'Body JSON required'}), 400
 
-    allowed = {'name', 'description', 'prompt', 'llm_model', 'embed_model', 'rag_config'}
+    allowed = {'name', 'description', 'prompt', 'llm_model', 'embed_model', 'rag_config', 'llm_server_id'}
     updates = {k: v for k, v in data.items() if k in allowed}
 
     if not updates:
@@ -217,6 +217,39 @@ def index_document_endpoint(agent_id, filename):
     thread.start()
 
     return jsonify({'message': f'Indexing started for "{filename}"'}), 202
+
+
+@agents_bp.route('/api/agents/<agent_id>/documents/<filename>', methods=['DELETE'])
+@token_required
+def delete_document(agent_id, filename):
+    try:
+        agent = agents_col.find_one({'_id': ObjectId(agent_id), 'user_id': request.user_id})
+    except Exception:
+        return jsonify({'error': INVALID_ID}), 400
+
+    if not agent:
+        return jsonify({'error': AGENT_NOT_FOUND}), 404
+
+    doc = next((d for d in agent.get('documents', []) if d['filename'] == filename), None)
+    if not doc:
+        return jsonify({'error': 'Document not found'}), 404
+
+    delete_document_vectors(agent_id, doc['file_path'])
+
+    try:
+        os.remove(doc['file_path'])
+    except OSError:
+        pass
+
+    agents_col.update_one(
+        {'_id': ObjectId(agent_id)},
+        {
+            '$pull': {'documents': {'filename': filename}},
+            '$set': {'updated_at': datetime.now(timezone.utc)}
+        }
+    )
+
+    return jsonify({'message': f'Document "{filename}" deleted'}), 200
 
 
 # ─── Chat ────────────────────────────────────────────────

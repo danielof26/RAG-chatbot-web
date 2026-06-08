@@ -6,3 +6,4 @@ db = client.get_default_database()
 
 users_col = db['users']
 agents_col = db['agents']
+llm_servers_col = db['llm_servers']

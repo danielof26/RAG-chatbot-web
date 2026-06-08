@@ -4,22 +4,40 @@ from llama_index.llms.ollama import Ollama
 import chromadb
 from llama_index.vector_stores.chroma import ChromaVectorStore
 import config
+from services.llm_providers import get_provider
+
+
+def _resolve_server(agent_config: dict):
+    """Obtiene el servidor LLM configurado en el agente desde MongoDB, o None."""
+    server_id = agent_config.get('llm_server_id')
+    if not server_id:
+        return None
+    from db import llm_servers_col
+    from bson import ObjectId
+    try:
+        return llm_servers_col.find_one({'_id': ObjectId(str(server_id))})
+    except Exception:
+        return None
 
 
 def _setup_settings(agent_config: dict):
-    """Configura el LLM y el modelo de embeddings para este agente."""
-    llm_model    = agent_config.get('llm_model', config.DEFAULT_LLM)
-    embed_model  = agent_config.get('embed_model', config.DEFAULT_EMBED_MODEL)
+    llm_model     = agent_config.get('llm_model', config.DEFAULT_LLM)
+    embed_model   = agent_config.get('embed_model', config.DEFAULT_EMBED_MODEL)
     system_prompt = agent_config.get('prompt', '')
 
-    Settings.llm = Ollama(
-        model=llm_model,
-        #base_url=config.OLLAMA_LLM_URL,
-        request_timeout=600.0,
-        system_prompt=system_prompt,
-        context_window=8000,
-        temperature=0.1
-    )
+    server = _resolve_server(agent_config)
+    if server:
+        provider = get_provider(server)
+        Settings.llm = provider.build_llm(model=llm_model, system_prompt=system_prompt)
+    else:
+        Settings.llm = Ollama(
+            model=llm_model,
+            request_timeout=600.0,
+            system_prompt=system_prompt or None,
+            context_window=8000,
+            temperature=0.1
+        )
+
     Settings.embed_model = OllamaEmbedding(
         model_name=embed_model,
         base_url=config.OLLAMA_EMBED_URL
@@ -96,6 +114,19 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict):
 
     for token in streaming_response.response_gen:
         yield token
+
+
+def delete_document_vectors(agent_id: str, file_path: str):
+    """
+    Borra de la colección ChromaDB del agente todos los vectores que pertenecen
+    a un documento concreto, identificándolos por el metadato 'file_path' que
+    SimpleDirectoryReader adjunta a cada chunk al indexar.
+    """
+    chroma_collection, _, _ = _get_chroma_store(agent_id)
+    try:
+        chroma_collection.delete(where={'file_path': file_path})
+    except Exception:
+        pass
 
 
 def delete_agent_collection(agent_id: str):

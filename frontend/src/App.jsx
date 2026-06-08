@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import Login from './pages/Login'
 import Agents from './pages/Agents'
 import AgentDetail from './pages/AgentDetail'
+import LLMServers from './pages/LLMServers'
 import PrivateRoute from './components/PrivateRoute'
 
 export default function App() {
@@ -16,6 +17,10 @@ export default function App() {
 
       <Route path="/agents/:id" element={
         <PrivateRoute><AgentDetail /></PrivateRoute>
+      } />
+
+      <Route path="/llm-servers" element={
+        <PrivateRoute><LLMServers /></PrivateRoute>
       } />
 
       {/* Redirige la raíz al login */}

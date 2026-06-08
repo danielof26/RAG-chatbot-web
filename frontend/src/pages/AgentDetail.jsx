@@ -19,9 +19,15 @@ export default function AgentDetail() {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [prompt, setPrompt] = useState('')
+  const [llmServerId, setLlmServerId] = useState('')
   const [llmModel, setLlmModel] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
+
+  // LLM servers & models
+  const [llmServers, setLlmServers] = useState([])
+  const [availableModels, setAvailableModels] = useState([])
+  const [loadingModels, setLoadingModels] = useState(false)
 
   // Documents
   const [uploading, setUploading] = useState(false)
@@ -34,6 +40,22 @@ export default function AgentDetail() {
   const [chatLoading, setChatLoading] = useState(false)
 
   useEffect(() => { fetchAgent() }, [id])
+  useEffect(() => { fetchLlmServers() }, [])
+
+  // Cuando cambia el servidor seleccionado, carga sus modelos
+  useEffect(() => {
+    if (!llmServerId) { setAvailableModels([]); return }
+    const load = async () => {
+      setLoadingModels(true)
+      const res = await fetch(`/api/llm-servers/${llmServerId}/models`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      const data = await res.json()
+      setAvailableModels(res.ok ? data.models : [])
+      setLoadingModels(false)
+    }
+    load()
+  }, [llmServerId])
 
   // Auto-refresh mientras haya documentos indexando
   useEffect(() => {
@@ -46,19 +68,25 @@ export default function AgentDetail() {
   const fetchAgent = async () => {
     setLoading(true)
     const res = await fetch(`/api/agents/${id}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
+      headers: { Authorization: `Bearer ${token}` }
     })
-    if (!res.ok) {
-      navigate('/agents')
-      return
-    }
+    if (!res.ok) { navigate('/agents'); return }
     const data = await res.json()
     setAgent(data)
     setName(data.name || '')
     setDescription(data.description || '')
     setPrompt(data.prompt || '')
+    setLlmServerId(data.llm_server_id || '')
     setLlmModel(data.llm_model || '')
     setLoading(false)
+  }
+
+  const fetchLlmServers = async () => {
+    const res = await fetch('/api/llm-servers', {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    const data = await res.json()
+    setLlmServers(res.ok ? data : [])
   }
 
   const handleSave = async () => {
@@ -68,9 +96,13 @@ export default function AgentDetail() {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
+        Authorization: `Bearer ${token}`
       },
-      body: JSON.stringify({ name, description, prompt, llm_model: llmModel })
+      body: JSON.stringify({
+        name, description, prompt,
+        llm_server_id: llmServerId || null,
+        llm_model: llmModel
+      })
     })
     setSaving(false)
     if (res.ok) {
@@ -82,10 +114,10 @@ export default function AgentDetail() {
   }
 
   const handleDelete = async () => {
-    if (!window.confirm('Delete this agent? This cannot be undone.')) return
+    if (!globalThis.confirm('Delete this agent? This cannot be undone.')) return
     await fetch(`/api/agents/${id}`, {
       method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
+      headers: { Authorization: `Bearer ${token}` }
     })
     navigate('/agents')
   }
@@ -95,13 +127,11 @@ export default function AgentDetail() {
     if (!file) return
     setUploading(true)
     setUploadMsg('')
-
     const form = new FormData()
     form.append('file', file)
-
     const res = await fetch(`/api/agents/${id}/documents`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}` },
       body: form
     })
     const data = await res.json()
@@ -111,11 +141,20 @@ export default function AgentDetail() {
     fileRef.current.value = ''
   }
 
+  const handleDeleteDocument = async (filename) => {
+    if (!globalThis.confirm(`Delete "${filename}"? This cannot be undone.`)) return
+    const res = await fetch(`/api/agents/${id}/documents/${encodeURIComponent(filename)}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    if (res.ok) await fetchAgent()
+  }
+
   const handleIndex = async (filename) => {
     setIndexingMsg('')
     const res = await fetch(`/api/agents/${id}/documents/${encodeURIComponent(filename)}/index`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` }
+      headers: { Authorization: `Bearer ${token}` }
     })
     const data = await res.json()
     setIndexingMsg(res.ok ? data.message : data.error)
@@ -127,12 +166,11 @@ export default function AgentDetail() {
     if (!question.trim()) return
     setChatLoading(true)
     setAnswer('')
-
     const res = await fetch(`/api/agents/${id}/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
+        Authorization: `Bearer ${token}`
       },
       body: JSON.stringify({ question })
     })
@@ -183,16 +221,18 @@ export default function AgentDetail() {
         {activeTab === 'Settings' && (
           <div className="space-y-5">
             <div>
-              <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Name</label>
+              <label htmlFor="agent-name" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Name</label>
               <input
+                id="agent-name"
                 value={name}
                 onChange={e => setName(e.target.value)}
                 className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Description</label>
+              <label htmlFor="agent-description" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Description</label>
               <input
+                id="agent-description"
                 value={description}
                 onChange={e => setDescription(e.target.value)}
                 placeholder="What does this agent do?"
@@ -200,8 +240,9 @@ export default function AgentDetail() {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">System prompt</label>
+              <label htmlFor="agent-prompt" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">System prompt</label>
               <textarea
+                id="agent-prompt"
                 value={prompt}
                 onChange={e => setPrompt(e.target.value)}
                 rows={5}
@@ -209,15 +250,53 @@ export default function AgentDetail() {
                 className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 resize-none"
               />
             </div>
+
+            {/* LLM Server selector */}
             <div>
-              <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">LLM Model</label>
-              <input
-                value={llmModel}
-                onChange={e => setLlmModel(e.target.value)}
-                placeholder="e.g. llama3.2:3b"
-                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
-              />
+              <div className="flex items-center justify-between mb-1">
+                <label htmlFor="llm-server-select" className="block text-xs font-medium text-gray-500 uppercase tracking-wide">LLM Server</label>
+                <button
+                  type="button"
+                  onClick={() => navigate('/llm-servers')}
+                  className="text-xs text-orange-400 hover:text-orange-500 transition"
+                >
+                  Manage servers →
+                </button>
+              </div>
+              <select
+                id="llm-server-select"
+                value={llmServerId}
+                onChange={e => { setLlmServerId(e.target.value); setLlmModel('') }}
+                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 bg-white"
+              >
+                <option value="">— No server configured —</option>
+                {llmServers.map(s => (
+                  <option key={s._id} value={s._id}>{s.name} ({s.type})</option>
+                ))}
+              </select>
             </div>
+
+            {/* Model selector */}
+            {llmServerId && (
+              <div>
+                <label htmlFor="llm-model-select" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Model</label>
+                {loadingModels ? (
+                  <p className="text-sm text-gray-400 animate-pulse">Loading models...</p>
+                ) : (
+                  <select
+                    id="llm-model-select"
+                    value={llmModel}
+                    onChange={e => setLlmModel(e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 bg-white"
+                  >
+                    <option value="">— Select a model —</option>
+                    {availableModels.map(m => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
 
             <div className="flex items-center justify-between pt-2">
               <button
@@ -261,17 +340,17 @@ export default function AgentDetail() {
               <p className="text-sm text-gray-300">No documents uploaded yet.</p>
             ) : (
               <div className="space-y-2">
-                {agent.documents?.map((doc, i) => (
-                  <div key={i} className="flex items-center justify-between border border-gray-100 rounded-lg px-4 py-3">
+                {agent.documents?.map((doc) => (
+                  <div key={doc.filename} className="flex items-center justify-between border border-gray-100 rounded-lg px-4 py-3">
                     <div className="flex items-center gap-3">
                       <span className="text-gray-300">📄</span>
                       <span className="text-sm text-gray-600">{doc.filename}</span>
                     </div>
                     <div className="flex items-center gap-3">
-                      {doc.status === 'pending'   && <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">Pending</span>}
-                      {doc.status === 'indexing'  && <span className="text-xs text-orange-500 bg-orange-50 px-2 py-1 rounded-full animate-pulse">Indexing...</span>}
-                      {doc.status === 'indexed'   && <span className="text-xs text-green-500 bg-green-50 px-2 py-1 rounded-full">Indexed</span>}
-                      {doc.status === 'error'     && <span className="text-xs text-red-400 bg-red-50 px-2 py-1 rounded-full">Error</span>}
+                      {doc.status === 'pending'  && <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">Pending</span>}
+                      {doc.status === 'indexing' && <span className="text-xs text-orange-500 bg-orange-50 px-2 py-1 rounded-full animate-pulse">Indexing...</span>}
+                      {doc.status === 'indexed'  && <span className="text-xs text-green-500 bg-green-50 px-2 py-1 rounded-full">Indexed</span>}
+                      {doc.status === 'error'    && <span className="text-xs text-red-400 bg-red-50 px-2 py-1 rounded-full">Error</span>}
                       {(doc.status === 'pending' || doc.status === 'error') && (
                         <button
                           onClick={() => handleIndex(doc.filename)}
@@ -280,6 +359,12 @@ export default function AgentDetail() {
                           Index
                         </button>
                       )}
+                      <button
+                        onClick={() => handleDeleteDocument(doc.filename)}
+                        className="text-xs text-red-400 hover:text-red-500 transition"
+                      >
+                        Delete
+                      </button>
                     </div>
                   </div>
                 ))}
