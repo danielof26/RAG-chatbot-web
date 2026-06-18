@@ -59,7 +59,15 @@ export default function Agents() {
 
       {/* Header */}
       <div className="border-b border-gray-100 px-8 py-4 flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-gray-800">My Agents</h1>
+        <div className="flex items-center gap-4">
+          <h1 className="text-lg font-semibold text-gray-800">My Agents</h1>
+          <button
+            onClick={() => navigate('/llm-servers')}
+            className="text-sm text-orange-400 hover:text-orange-500 transition"
+          >
+            Manage servers
+          </button>
+        </div>
         <div className="flex items-center gap-4">
           <span className="text-sm text-gray-400">{email}</span>
           <button

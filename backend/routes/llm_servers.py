@@ -3,7 +3,7 @@ from bson import ObjectId
 from datetime import datetime, timezone
 from db import llm_servers_col
 from middleware.auth_middleware import token_required
-from services.llm_providers import get_provider
+from services.llm_providers import get_provider, PROVIDERS
 
 llm_servers_bp = Blueprint('llm_servers', __name__)
 
@@ -40,8 +40,10 @@ def create_llm_server():
 
     if not name:
         return jsonify({'error': 'Name is required'}), 400
-    if server_type not in ('ollama', 'gemini'):
-        return jsonify({'error': 'Type must be ollama or gemini'}), 400
+
+    provider_cls = PROVIDERS.get(server_type)
+    if not provider_cls:
+        return jsonify({'error': f'Type must be one of: {", ".join(PROVIDERS)}'}), 400
 
     server = {
         'user_id': request.user_id,
@@ -50,16 +52,14 @@ def create_llm_server():
         'created_at': datetime.now(timezone.utc)
     }
 
-    if server_type == 'ollama':
-        base_url = data.get('base_url', '').strip()
-        if not base_url:
-            return jsonify({'error': 'base_url is required for Ollama'}), 400
-        server['base_url'] = base_url
-    else:
-        api_key = data.get('api_key', '').strip()
-        if not api_key:
-            return jsonify({'error': 'api_key is required for Gemini'}), 400
-        server['api_key'] = api_key
+    for field in provider_cls.REQUIRED_FIELDS:
+        value = data.get(field, '').strip()
+        if not value:
+            return jsonify({'error': f'{field} is required for {server_type}'}), 400
+        server[field] = value
+
+    if not get_provider(server).validate():
+        return jsonify({'error': f'Could not connect to the {server_type} server. Check the URL and credentials.'}), 400
 
     result = llm_servers_col.insert_one(server)
     server['_id'] = str(result.inserted_id)

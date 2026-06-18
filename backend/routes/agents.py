@@ -3,7 +3,8 @@ from bson import ObjectId
 from datetime import datetime, timezone
 import os
 import threading
-from db import agents_col
+import traceback
+from db import agents_col, api_keys_col
 from middleware.auth_middleware import token_required
 from services.rag_service import index_document, query_agent, delete_agent_collection, delete_document_vectors
 import config
@@ -14,20 +15,22 @@ DOC_FILENAME    = 'documents.filename'
 DOC_STATUS      = 'documents.$.status'
 INVALID_ID      = 'Invalid ID agent'
 AGENT_NOT_FOUND = 'Agent not found'
+BODY_REQUIRED   = 'Body JSON required'
 
 
-def _index_in_background(agent_id, file_path, embed_model, filename):
+def _index_in_background(agent_id, file_path, embed_model, embed_server_id, filename):
     try:
         agents_col.update_one(
             {'_id': ObjectId(agent_id), DOC_FILENAME: filename},
             {'$set': {DOC_STATUS: 'indexing'}}
         )
-        index_document(agent_id, file_path, embed_model=embed_model)
+        index_document(agent_id, file_path, embed_model=embed_model, embed_server_id=embed_server_id)
         agents_col.update_one(
             {'_id': ObjectId(agent_id), DOC_FILENAME: filename},
             {'$set': {DOC_STATUS: 'indexed'}}
         )
     except Exception as e:
+        traceback.print_exc()
         agents_col.update_one(
             {'_id': ObjectId(agent_id), DOC_FILENAME: filename},
             {'$set': {DOC_STATUS: 'error', 'documents.$.error': str(e)}}
@@ -54,7 +57,7 @@ def _serialize(agent):
 def create_agent():
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'Body JSON required'}), 400
+        return jsonify({'error': BODY_REQUIRED}), 400
 
     name = data.get('name', '').strip()
     if not name:
@@ -107,9 +110,9 @@ def get_agent(agent_id):
 def update_agent(agent_id):
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'Body JSON required'}), 400
+        return jsonify({'error': BODY_REQUIRED}), 400
 
-    allowed = {'name', 'description', 'prompt', 'llm_model', 'embed_model', 'rag_config', 'llm_server_id'}
+    allowed = {'name', 'description', 'prompt', 'llm_model', 'embed_model', 'rag_config', 'llm_server_id', 'embed_server_id', 'api_key_required'}
     updates = {k: v for k, v in data.items() if k in allowed}
 
     if not updates:
@@ -188,7 +191,37 @@ def upload_document(agent_id):
         }
     )
 
-    return jsonify({'message': f'Document "{file.filename}" uploaded. Click Index to generate embeddings.'}), 201
+    # Lanzar la indexación automáticamente
+    thread = threading.Thread(
+        target=_index_in_background,
+        args=(agent_id, file_path, agent.get('embed_model'), agent.get('embed_server_id'), file.filename),
+        daemon=True
+    )
+    thread.start()
+
+    return jsonify({'message': f'Document "{file.filename}" uploaded. Indexing started.'}), 201
+
+
+@agents_bp.route('/api/agents/<agent_id>/documents', methods=['GET'])
+@token_required
+def get_documents(agent_id):
+    try:
+        agent = agents_col.find_one(
+            {'_id': ObjectId(agent_id), 'user_id': request.user_id},
+            {'documents': 1}
+        )
+    except Exception:
+        return jsonify({'error': INVALID_ID}), 400
+
+    if not agent:
+        return jsonify({'error': AGENT_NOT_FOUND}), 404
+
+    documents = agent.get('documents', [])
+    for doc in documents:
+        if 'uploaded_at' in doc and isinstance(doc['uploaded_at'], datetime):
+            doc['uploaded_at'] = doc['uploaded_at'].isoformat()
+
+    return jsonify(documents), 200
 
 
 @agents_bp.route('/api/agents/<agent_id>/documents/<filename>/index', methods=['POST'])
@@ -211,7 +244,7 @@ def index_document_endpoint(agent_id, filename):
 
     thread = threading.Thread(
         target=_index_in_background,
-        args=(agent_id, doc['file_path'], agent.get('embed_model'), filename),
+        args=(agent_id, doc['file_path'], agent.get('embed_model'), agent.get('embed_server_id'), filename),
         daemon=True
     )
     thread.start()
@@ -267,7 +300,41 @@ def chat(agent_id):
 
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'Body JSON required'}), 400
+        return jsonify({'error': BODY_REQUIRED}), 400
+
+    question = data.get('question', '').strip()
+    if not question:
+        return jsonify({'error': 'Question is mandatory'}), 400
+
+    try:
+        answer = query_agent(agent_id, question, agent)
+    except Exception as e:
+        return jsonify({'error': f'Error at processing the question: {str(e)}'}), 500
+
+    return jsonify({'answer': answer}), 200
+
+
+# ─── Endpoint público (sin JWT, con API Key opcional) ─────
+
+@agents_bp.route('/api/public/agents/<agent_id>/chat', methods=['POST'])
+def public_chat(agent_id):
+    try:
+        agent = agents_col.find_one({'_id': ObjectId(agent_id)})
+    except Exception:
+        return jsonify({'error': INVALID_ID}), 400
+
+    if not agent:
+        return jsonify({'error': AGENT_NOT_FOUND}), 404
+
+    if agent.get('api_key_required', False):
+        provided = request.headers.get('X-API-Key', '')
+        valid = api_keys_col.find_one({'agent_id': agent_id, 'key': provided})
+        if not valid:
+            return jsonify({'error': 'Invalid or missing API key'}), 401
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': BODY_REQUIRED}), 400
 
     question = data.get('question', '').strip()
     if not question:

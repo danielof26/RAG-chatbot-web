@@ -18,6 +18,12 @@ export default function LLMServers() {
 
   useEffect(() => { fetchServers() }, [])
 
+  const handleTypeChange = (newType) => {
+    setType(newType)
+    setBaseUrl('')
+    setApiKey('')
+  }
+
   const fetchServers = async () => {
     setLoading(true)
     const res = await fetch('/api/llm-servers', {
@@ -35,6 +41,7 @@ export default function LLMServers() {
 
     const body = { name, type }
     if (type === 'ollama') body.base_url = baseUrl
+    else if (type === 'openai') { body.base_url = baseUrl; body.api_key = apiKey }
     else body.api_key = apiKey
 
     const res = await fetch('/api/llm-servers', {
@@ -60,7 +67,7 @@ export default function LLMServers() {
   }
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Delete this server?')) return
+    if (!globalThis.confirm('Delete this server?')) return
     await fetch(`/api/llm-servers/${id}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token}` }
@@ -92,7 +99,7 @@ export default function LLMServers() {
             <div className="flex gap-3">
               <button
                 type="button"
-                onClick={() => setType('ollama')}
+                onClick={() => handleTypeChange('ollama')}
                 className={`flex-1 py-2 text-sm font-medium rounded-lg border transition ${
                   type === 'ollama'
                     ? 'border-orange-400 text-orange-500 bg-orange-50'
@@ -103,7 +110,7 @@ export default function LLMServers() {
               </button>
               <button
                 type="button"
-                onClick={() => setType('gemini')}
+                onClick={() => handleTypeChange('gemini')}
                 className={`flex-1 py-2 text-sm font-medium rounded-lg border transition ${
                   type === 'gemini'
                     ? 'border-orange-400 text-orange-500 bg-orange-50'
@@ -111,6 +118,17 @@ export default function LLMServers() {
                 }`}
               >
                 Gemini
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTypeChange('openai')}
+                className={`flex-1 py-2 text-sm font-medium rounded-lg border transition ${
+                  type === 'openai'
+                    ? 'border-orange-400 text-orange-500 bg-orange-50'
+                    : 'border-gray-200 text-gray-400'
+                }`}
+              >
+                OpenAI
               </button>
             </div>
 
@@ -122,7 +140,7 @@ export default function LLMServers() {
               className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
             />
 
-            {type === 'ollama' ? (
+            {type === 'ollama' && (
               <input
                 value={baseUrl}
                 onChange={e => setBaseUrl(e.target.value)}
@@ -130,7 +148,9 @@ export default function LLMServers() {
                 required
                 className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
               />
-            ) : (
+            )}
+
+            {type === 'gemini' && (
               <input
                 value={apiKey}
                 onChange={e => setApiKey(e.target.value)}
@@ -139,6 +159,26 @@ export default function LLMServers() {
                 required
                 className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
               />
+            )}
+
+            {type === 'openai' && (
+              <>
+                <input
+                  value={baseUrl}
+                  onChange={e => setBaseUrl(e.target.value)}
+                  placeholder="API base URL (e.g. http://host:4000)"
+                  required
+                  className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+                />
+                <input
+                  value={apiKey}
+                  onChange={e => setApiKey(e.target.value)}
+                  placeholder="API Key"
+                  type="password"
+                  required
+                  className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+                />
+              </>
             )}
 
             <div className="flex items-center justify-between">
@@ -169,13 +209,15 @@ export default function LLMServers() {
                   <div>
                     <p className="text-sm font-medium text-gray-700">{s.name}</p>
                     <p className="text-xs text-gray-400 mt-0.5">
-                      {s.type === 'ollama' ? s.base_url : `Gemini · ${s.api_key}`}
+                      {s.type === 'ollama' && s.base_url}
+                      {s.type === 'gemini' && `Gemini · ${s.api_key}`}
+                      {s.type === 'openai' && `${s.base_url} · ${s.api_key}`}
                     </p>
                   </div>
                   <span className={`text-xs px-2 py-1 rounded-full mr-3 ${
-                    s.type === 'ollama'
-                      ? 'bg-blue-50 text-blue-500'
-                      : 'bg-purple-50 text-purple-500'
+                    s.type === 'ollama' ? 'bg-blue-50 text-blue-500' :
+                    s.type === 'gemini' ? 'bg-purple-50 text-purple-500' :
+                    'bg-green-50 text-green-600'
                   }`}>
                     {s.type}
                   </span>

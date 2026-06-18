@@ -20,6 +20,19 @@ def _resolve_server(agent_config: dict):
         return None
 
 
+def _resolve_embed_server(agent_config: dict):
+    """Obtiene el servidor de embeddings configurado en el agente, o None."""
+    server_id = agent_config.get('embed_server_id')
+    if not server_id:
+        return None
+    from db import llm_servers_col
+    from bson import ObjectId
+    try:
+        return llm_servers_col.find_one({'_id': ObjectId(str(server_id))})
+    except Exception:
+        return None
+
+
 def _setup_settings(agent_config: dict):
     llm_model     = agent_config.get('llm_model', config.DEFAULT_LLM)
     embed_model   = agent_config.get('embed_model', config.DEFAULT_EMBED_MODEL)
@@ -38,9 +51,16 @@ def _setup_settings(agent_config: dict):
             temperature=0.1
         )
 
+    embed_server = _resolve_embed_server(agent_config)
+    if not embed_server or embed_server.get('type') != 'ollama':
+        raise ValueError(
+            'No embedding server configured for this agent. '
+            'Go to Settings → Embedding Server and select an Ollama server.'
+        )
+
     Settings.embed_model = OllamaEmbedding(
         model_name=embed_model,
-        base_url=config.OLLAMA_EMBED_URL
+        base_url=embed_server['base_url']
     )
 
 
@@ -54,12 +74,15 @@ def _get_chroma_store(agent_id: str):
     return chroma_collection, vector_store, storage_context
 
 
-def index_document(agent_id: str, file_path: str, embed_model: str = None):
+def index_document(agent_id: str, file_path: str, embed_model: str = None, embed_server_id: str = None):
     """
     Indexa un documento en la colección ChromaDB del agente.
     Se puede llamar varias veces para añadir más documentos.
     """
-    _setup_settings({'embed_model': embed_model or config.DEFAULT_EMBED_MODEL})
+    _setup_settings({
+        'embed_model': embed_model or config.DEFAULT_EMBED_MODEL,
+        'embed_server_id': embed_server_id
+    })
 
     _, _, storage_context = _get_chroma_store(agent_id)
 
