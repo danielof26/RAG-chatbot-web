@@ -321,7 +321,7 @@ export default function AgentDetail() {
     if (!question.trim()) return
     const askedQuestion = question
     setQuestion('')
-    setMessages(prev => [...prev, { role: 'user', content: askedQuestion, key: crypto.randomUUID() }])
+    setMessages(prev => [...prev, { role: 'user', content: askedQuestion, key: `${Date.now()}-${Math.random().toString(36).slice(2)}` }])
     setChatLoading(true)
     const res = await fetch(`/api/agents/${id}/chat`, {
       method: 'POST',
@@ -333,7 +333,7 @@ export default function AgentDetail() {
     })
     const data = await res.json()
     setChatLoading(false)
-    setMessages(prev => [...prev, { role: 'assistant', content: res.ok ? data.answer : data.error, key: crypto.randomUUID() }])
+    setMessages(prev => [...prev, { role: 'assistant', content: res.ok ? data.answer : data.error, key: `${Date.now()}-${Math.random().toString(36).slice(2)}` }])
   }
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-sm text-gray-400">Loading...</div>
