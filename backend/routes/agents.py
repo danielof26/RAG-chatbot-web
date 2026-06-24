@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import os
 import threading
 import traceback
-from db import agents_col, api_keys_col
+from db import agents_col, api_keys_col, chat_messages_col
 from middleware.auth_middleware import token_required
 from services.rag_service import index_document, query_agent, delete_agent_collection, delete_document_vectors
 import config
@@ -18,13 +18,19 @@ AGENT_NOT_FOUND = 'Agent not found'
 BODY_REQUIRED   = 'Body JSON required'
 
 
-def _index_in_background(agent_id, file_path, embed_model, embed_server_id, filename):
+def _index_in_background(agent_id, file_path, embed_model, embed_server_id, rag_config, filename):
     try:
         agents_col.update_one(
             {'_id': ObjectId(agent_id), DOC_FILENAME: filename},
             {'$set': {DOC_STATUS: 'indexing'}}
         )
-        index_document(agent_id, file_path, embed_model=embed_model, embed_server_id=embed_server_id)
+        index_document(
+            agent_id, file_path,
+            embed_model=embed_model,
+            embed_server_id=embed_server_id,
+            chunk_size=rag_config.get('chunk_size'),
+            chunk_overlap=rag_config.get('chunk_overlap')
+        )
         agents_col.update_one(
             {'_id': ObjectId(agent_id), DOC_FILENAME: filename},
             {'$set': {DOC_STATUS: 'indexed'}}
@@ -73,7 +79,8 @@ def create_agent():
         'rag_config': {
             'similarity_top_k': 5,
             'chunk_size': 512,
-            'chunk_overlap': 50
+            'chunk_overlap': 50,
+            'temperature': 0.1
         },
         'documents': [],
         'created_at': datetime.now(timezone.utc),
@@ -194,7 +201,7 @@ def upload_document(agent_id):
     # Lanzar la indexación automáticamente
     thread = threading.Thread(
         target=_index_in_background,
-        args=(agent_id, file_path, agent.get('embed_model'), agent.get('embed_server_id'), file.filename),
+        args=(agent_id, file_path, agent.get('embed_model'), agent.get('embed_server_id'), agent.get('rag_config', {}), file.filename),
         daemon=True
     )
     thread.start()
@@ -244,7 +251,7 @@ def index_document_endpoint(agent_id, filename):
 
     thread = threading.Thread(
         target=_index_in_background,
-        args=(agent_id, doc['file_path'], agent.get('embed_model'), agent.get('embed_server_id'), filename),
+        args=(agent_id, doc['file_path'], agent.get('embed_model'), agent.get('embed_server_id'), agent.get('rag_config', {}), filename),
         daemon=True
     )
     thread.start()
@@ -263,11 +270,15 @@ def delete_document(agent_id, filename):
     if not agent:
         return jsonify({'error': AGENT_NOT_FOUND}), 404
 
-    doc = next((d for d in agent.get('documents', []) if d['filename'] == filename), None)
+    documents = agent.get('documents', [])
+    doc = next((d for d in documents if d['filename'] == filename), None)
     if not doc:
         return jsonify({'error': 'Document not found'}), 404
 
-    delete_document_vectors(agent_id, doc['file_path'])
+    if len(documents) == 1:
+        delete_agent_collection(agent_id)
+    else:
+        delete_document_vectors(agent_id, doc['file_path'])
 
     try:
         os.remove(doc['file_path'])
@@ -286,6 +297,16 @@ def delete_document(agent_id, filename):
 
 
 # ─── Chat ────────────────────────────────────────────────
+
+def _save_message(agent_id, user_id, role, content):
+    chat_messages_col.insert_one({
+        'agent_id': agent_id,
+        'user_id': user_id,
+        'role': role,
+        'content': content,
+        'created_at': datetime.now(timezone.utc)
+    })
+
 
 @agents_bp.route('/api/agents/<agent_id>/chat', methods=['POST'])
 @token_required
@@ -311,7 +332,47 @@ def chat(agent_id):
     except Exception as e:
         return jsonify({'error': f'Error at processing the question: {str(e)}'}), 500
 
+    _save_message(agent_id, request.user_id, 'user', question)
+    _save_message(agent_id, request.user_id, 'assistant', answer)
+
     return jsonify({'answer': answer}), 200
+
+
+@agents_bp.route('/api/agents/<agent_id>/chat/history', methods=['GET'])
+@token_required
+def get_chat_history(agent_id):
+    try:
+        agent = agents_col.find_one({'_id': ObjectId(agent_id), 'user_id': request.user_id})
+    except Exception:
+        return jsonify({'error': INVALID_ID}), 400
+
+    if not agent:
+        return jsonify({'error': AGENT_NOT_FOUND}), 404
+
+    messages = list(chat_messages_col.find(
+        {'agent_id': agent_id, 'user_id': request.user_id}
+    ).sort('created_at', 1))
+
+    for m in messages:
+        m['_id'] = str(m['_id'])
+        m['created_at'] = m['created_at'].isoformat()
+
+    return jsonify(messages), 200
+
+
+@agents_bp.route('/api/agents/<agent_id>/chat/history', methods=['DELETE'])
+@token_required
+def clear_chat_history(agent_id):
+    try:
+        agent = agents_col.find_one({'_id': ObjectId(agent_id), 'user_id': request.user_id})
+    except Exception:
+        return jsonify({'error': INVALID_ID}), 400
+
+    if not agent:
+        return jsonify({'error': AGENT_NOT_FOUND}), 404
+
+    chat_messages_col.delete_many({'agent_id': agent_id, 'user_id': request.user_id})
+    return jsonify({'message': 'Chat history cleared'}), 200
 
 
 # ─── Endpoint público (sin JWT, con API Key opcional) ─────

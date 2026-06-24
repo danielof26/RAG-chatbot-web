@@ -7,6 +7,7 @@ from routes.agents import agents_bp
 from routes.ollama import ollama_bp
 from routes.llm_servers import llm_servers_bp
 from routes.api_keys import api_keys_bp
+from routes.openapi import openapi_bp
 
 FRONTEND_DIST = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'dist')
 
@@ -18,6 +19,7 @@ app.register_blueprint(agents_bp)
 app.register_blueprint(ollama_bp)
 app.register_blueprint(llm_servers_bp)
 app.register_blueprint(api_keys_bp)
+app.register_blueprint(openapi_bp)
 
 
 @app.route('/', defaults={'path': ''}, methods=['GET'])

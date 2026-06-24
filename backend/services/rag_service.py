@@ -1,5 +1,5 @@
 from llama_index.core import VectorStoreIndex, Settings, SimpleDirectoryReader, StorageContext
-from llama_index.embeddings.ollama import OllamaEmbedding
+from llama_index.core.node_parser import SentenceSplitter
 from llama_index.llms.ollama import Ollama
 import chromadb
 from llama_index.vector_stores.chroma import ChromaVectorStore
@@ -37,31 +37,30 @@ def _setup_settings(agent_config: dict):
     llm_model     = agent_config.get('llm_model', config.DEFAULT_LLM)
     embed_model   = agent_config.get('embed_model', config.DEFAULT_EMBED_MODEL)
     system_prompt = agent_config.get('prompt', '')
+    temperature   = agent_config.get('rag_config', {}).get('temperature', 0.1)
 
     server = _resolve_server(agent_config)
     if server:
         provider = get_provider(server)
-        Settings.llm = provider.build_llm(model=llm_model, system_prompt=system_prompt)
+        Settings.llm = provider.build_llm(model=llm_model, system_prompt=system_prompt, temperature=temperature)
     else:
         Settings.llm = Ollama(
             model=llm_model,
             request_timeout=600.0,
             system_prompt=system_prompt or None,
             context_window=8000,
-            temperature=0.1
+            temperature=temperature
         )
 
     embed_server = _resolve_embed_server(agent_config)
-    if not embed_server or embed_server.get('type') != 'ollama':
+    if not embed_server:
         raise ValueError(
             'No embedding server configured for this agent. '
-            'Go to Settings → Embedding Server and select an Ollama server.'
+            'Go to Documents → Embedding Server and select one.'
         )
 
-    Settings.embed_model = OllamaEmbedding(
-        model_name=embed_model,
-        base_url=embed_server['base_url']
-    )
+    embed_provider = get_provider(embed_server)
+    Settings.embed_model = embed_provider.build_embedding(embed_model)
 
 
 def _get_chroma_store(agent_id: str):
@@ -74,7 +73,8 @@ def _get_chroma_store(agent_id: str):
     return chroma_collection, vector_store, storage_context
 
 
-def index_document(agent_id: str, file_path: str, embed_model: str = None, embed_server_id: str = None):
+def index_document(agent_id: str, file_path: str, embed_model: str = None, embed_server_id: str = None,
+                    chunk_size: int = None, chunk_overlap: int = None):
     """
     Indexa un documento en la colección ChromaDB del agente.
     Se puede llamar varias veces para añadir más documentos.
@@ -87,7 +87,16 @@ def index_document(agent_id: str, file_path: str, embed_model: str = None, embed
     _, _, storage_context = _get_chroma_store(agent_id)
 
     documents = SimpleDirectoryReader(input_files=[file_path]).load_data()
-    VectorStoreIndex.from_documents(documents, storage_context=storage_context)
+
+    splitter = SentenceSplitter(
+        chunk_size=chunk_size or 512,
+        chunk_overlap=chunk_overlap or 50
+    )
+    VectorStoreIndex.from_documents(
+        documents,
+        storage_context=storage_context,
+        transformations=[splitter]
+    )
 
 
 def query_agent(agent_id: str, question: str, agent_config: dict) -> str:

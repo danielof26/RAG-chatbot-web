@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
-const TABS = ['Settings', 'Documents', 'Chat', 'API']
+const TABS = ['Settings', 'Documents', 'Chat', 'API', 'Advanced']
 
 export default function AgentDetail() {
   const { id } = useParams()
@@ -34,6 +34,8 @@ export default function AgentDetail() {
   const [embedModel, setEmbedModel] = useState('')
   const [availableEmbedModels, setAvailableEmbedModels] = useState([])
   const [loadingEmbedModels, setLoadingEmbedModels] = useState(false)
+  const [savingEmbed, setSavingEmbed] = useState(false)
+  const [embedSaveMsg, setEmbedSaveMsg] = useState('')
 
   // API Keys
   const [apiKeyRequired, setApiKeyRequired] = useState(false)
@@ -42,6 +44,14 @@ export default function AgentDetail() {
   const [createdKey, setCreatedKey] = useState(null)
   const [savingApi, setSavingApi] = useState(false)
 
+  // Advanced (RAG config)
+  const [topK, setTopK] = useState(5)
+  const [chunkSize, setChunkSize] = useState(512)
+  const [chunkOverlap, setChunkOverlap] = useState(50)
+  const [temperature, setTemperature] = useState(0.1)
+  const [savingAdvanced, setSavingAdvanced] = useState(false)
+  const [advancedSaveMsg, setAdvancedSaveMsg] = useState('')
+
   // Documents
   const [uploading, setUploading] = useState(false)
   const [uploadMsg, setUploadMsg] = useState('')
@@ -49,12 +59,16 @@ export default function AgentDetail() {
 
   // Chat
   const [question, setQuestion] = useState('')
-  const [answer, setAnswer] = useState('')
+  const [messages, setMessages] = useState([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
   const [chatLoading, setChatLoading] = useState(false)
+  const chatEndRef = useRef()
 
   useEffect(() => { fetchAgent() }, [id])
   useEffect(() => { fetchLlmServers() }, [])
   useEffect(() => { if (activeTab === 'API') fetchApiKeys() }, [activeTab])
+  useEffect(() => { if (activeTab === 'Chat') fetchChatHistory() }, [activeTab])
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
   // Cuando cambia el servidor seleccionado, carga sus modelos
   useEffect(() => {
@@ -109,6 +123,10 @@ export default function AgentDetail() {
     setEmbedServerId(data.embed_server_id || '')
     setEmbedModel(data.embed_model || '')
     setApiKeyRequired(data.api_key_required || false)
+    setTopK(data.rag_config?.similarity_top_k ?? 5)
+    setChunkSize(data.rag_config?.chunk_size ?? 512)
+    setChunkOverlap(data.rag_config?.chunk_overlap ?? 50)
+    setTemperature(data.rag_config?.temperature ?? 0.1)
     setLoading(false)
   }
 
@@ -142,8 +160,6 @@ export default function AgentDetail() {
         name, description, prompt,
         llm_server_id: llmServerId || null,
         llm_model: llmModel,
-        embed_server_id: embedServerId || null,
-        embed_model: embedModel,
         api_key_required: apiKeyRequired
       })
     })
@@ -233,6 +249,22 @@ export default function AgentDetail() {
     await fetchApiKeys()
   }
 
+  const handleSaveEmbedSettings = async () => {
+    setSavingEmbed(true)
+    setEmbedSaveMsg('')
+    const res = await fetch(`/api/agents/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        embed_server_id: embedServerId || null,
+        embed_model: embedModel
+      })
+    })
+    setSavingEmbed(false)
+    setEmbedSaveMsg(res.ok ? 'Saved!' : 'Error saving')
+    if (res.ok) setTimeout(() => setEmbedSaveMsg(''), 2000)
+  }
+
   const handleSaveApiSettings = async () => {
     setSavingApi(true)
     await fetch(`/api/agents/${id}`, {
@@ -243,22 +275,65 @@ export default function AgentDetail() {
     setSavingApi(false)
   }
 
+  const handleSaveAdvanced = async () => {
+    setSavingAdvanced(true)
+    setAdvancedSaveMsg('')
+    const res = await fetch(`/api/agents/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        rag_config: {
+          similarity_top_k: Number(topK),
+          chunk_size: Number(chunkSize),
+          chunk_overlap: Number(chunkOverlap),
+          temperature: Number(temperature)
+        }
+      })
+    })
+    setSavingAdvanced(false)
+    setAdvancedSaveMsg(res.ok ? 'Saved!' : 'Error saving')
+    if (res.ok) setTimeout(() => setAdvancedSaveMsg(''), 2000)
+  }
+
+  const fetchChatHistory = async () => {
+    setLoadingHistory(true)
+    const res = await fetch(`/api/agents/${id}/chat/history`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    if (res.ok) {
+      const history = await res.json()
+      setMessages(history.map(m => ({ ...m, key: m._id })))
+    }
+    setLoadingHistory(false)
+  }
+
+  const handleClearChat = async () => {
+    if (!globalThis.confirm('Clear the whole conversation? This cannot be undone.')) return
+    await fetch(`/api/agents/${id}/chat/history`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    setMessages([])
+  }
+
   const handleChat = async (e) => {
     e.preventDefault()
     if (!question.trim()) return
+    const askedQuestion = question
+    setQuestion('')
+    setMessages(prev => [...prev, { role: 'user', content: askedQuestion, key: crypto.randomUUID() }])
     setChatLoading(true)
-    setAnswer('')
     const res = await fetch(`/api/agents/${id}/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`
       },
-      body: JSON.stringify({ question })
+      body: JSON.stringify({ question: askedQuestion })
     })
     const data = await res.json()
     setChatLoading(false)
-    setAnswer(res.ok ? data.answer : data.error)
+    setMessages(prev => [...prev, { role: 'assistant', content: res.ok ? data.answer : data.error, key: crypto.randomUUID() }])
   }
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-sm text-gray-400">Loading...</div>
@@ -385,57 +460,6 @@ export default function AgentDetail() {
               </div>
             )}
 
-            {/* Embedding Server selector */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label htmlFor="embed-server-select" className="block text-xs font-medium text-gray-500 uppercase tracking-wide">Embedding Server</label>
-                <button
-                  type="button"
-                  onClick={() => navigate('/llm-servers')}
-                  className="text-xs text-orange-400 hover:text-orange-500 transition"
-                >
-                  Manage servers →
-                </button>
-              </div>
-              <select
-                id="embed-server-select"
-                value={embedServerId}
-                onChange={e => { setEmbedServerId(e.target.value); setEmbedModel('') }}
-                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 bg-white"
-              >
-                <option value="">— Select an embedding server (required) —</option>
-                {llmServers.filter(s => s.type === 'ollama').map(s => (
-                  <option key={s._id} value={s._id}>{s.name}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Embedding Model selector */}
-            {embedServerId && (
-              <div>
-                <label htmlFor="embed-model-select" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Embedding Model</label>
-                {loadingEmbedModels && (
-                  <p className="text-sm text-gray-400 animate-pulse">Loading models...</p>
-                )}
-                {!loadingEmbedModels && (
-                  <>
-                    <input
-                      id="embed-model-select"
-                      list="embed-model-options"
-                      value={embedModel}
-                      onChange={e => setEmbedModel(e.target.value)}
-                      placeholder="Select or type a model name"
-                      className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
-                    />
-                    <datalist id="embed-model-options">
-                      {availableEmbedModels.map(m => (
-                        <option key={m} value={m} />
-                      ))}
-                    </datalist>
-                  </>
-                )}
-              </div>
-            )}
 
             <div className="flex items-center justify-between pt-2">
               <button
@@ -461,6 +485,74 @@ export default function AgentDetail() {
         {/* ── DOCUMENTS ── */}
         {activeTab === 'Documents' && (
           <div>
+            {/* Embedding Server selector */}
+            <div className="mb-6 border border-gray-100 rounded-xl px-5 py-4">
+              <div className="flex items-center justify-between mb-1">
+                <label htmlFor="embed-server-select" className="block text-xs font-medium text-gray-500 uppercase tracking-wide">Embedding Server</label>
+                <button
+                  type="button"
+                  onClick={() => navigate('/llm-servers')}
+                  className="text-xs text-orange-400 hover:text-orange-500 transition"
+                >
+                  Manage servers →
+                </button>
+              </div>
+              <p className="text-xs text-gray-400 mb-3">
+                Used to generate embeddings when indexing or querying documents for this agent.
+                Make sure the model you pick below actually supports embeddings on this server —
+                not every model does (e.g. chat-only models will fail).
+              </p>
+              <select
+                id="embed-server-select"
+                value={embedServerId}
+                onChange={e => { setEmbedServerId(e.target.value); setEmbedModel('') }}
+                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 bg-white mb-3"
+              >
+                <option value="">— Select an embedding server (required) —</option>
+                {llmServers.map(s => (
+                  <option key={s._id} value={s._id}>{s.name} ({s.type})</option>
+                ))}
+              </select>
+
+              {/* Embedding Model selector */}
+              {embedServerId && (
+                <div className="mb-3">
+                  <label htmlFor="embed-model-select" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Embedding Model</label>
+                  {loadingEmbedModels && (
+                    <p className="text-sm text-gray-400 animate-pulse">Loading models...</p>
+                  )}
+                  {!loadingEmbedModels && (
+                    <>
+                      <input
+                        id="embed-model-select"
+                        list="embed-model-options"
+                        value={embedModel}
+                        onChange={e => setEmbedModel(e.target.value)}
+                        placeholder="Select or type a model name"
+                        className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+                      />
+                      <datalist id="embed-model-options">
+                        {availableEmbedModels.map(m => (
+                          <option key={m} value={m} />
+                        ))}
+                      </datalist>
+                    </>
+                  )}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-3">
+                {embedSaveMsg && <span className="text-sm text-gray-400">{embedSaveMsg}</span>}
+                <button
+                  onClick={handleSaveEmbedSettings}
+                  disabled={savingEmbed}
+                  className="bg-orange-400 hover:bg-orange-500 text-white text-sm font-medium px-4 py-1.5 rounded-lg transition disabled:opacity-50"
+                >
+                  {savingEmbed ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+            </div>
+
             <div className="mb-6">
               <input type="file" ref={fileRef} onChange={handleUpload} className="hidden" />
               <button
@@ -520,7 +612,50 @@ export default function AgentDetail() {
         {/* ── CHAT ── */}
         {activeTab === 'Chat' && (
           <div>
-            <form onSubmit={handleChat} className="flex gap-3 mb-6">
+            {messages.length > 0 && (
+              <div className="flex justify-end mb-3">
+                <button
+                  onClick={handleClearChat}
+                  className="text-xs text-gray-400 hover:text-red-500 transition"
+                >
+                  Clear chat
+                </button>
+              </div>
+            )}
+
+            <div className="max-h-[60vh] overflow-y-auto space-y-4 mb-6 pr-1">
+              {loadingHistory && (
+                <p className="text-sm text-gray-300">Loading conversation...</p>
+              )}
+
+              {!loadingHistory && messages.length === 0 && (
+                <p className="text-sm text-gray-300">Ask something about your documents to start the conversation.</p>
+              )}
+
+              {messages.map(m => (
+                <div key={m.key} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[80%] rounded-xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
+                    m.role === 'user'
+                      ? 'bg-orange-400 text-white'
+                      : 'bg-gray-50 border border-gray-100 text-gray-700'
+                  }`}>
+                    {m.content}
+                  </div>
+                </div>
+              ))}
+
+              {chatLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-sm text-gray-400 animate-pulse">
+                    Thinking...
+                  </div>
+                </div>
+              )}
+
+              <div ref={chatEndRef} />
+            </div>
+
+            <form onSubmit={handleChat} className="flex gap-3">
               <input
                 value={question}
                 onChange={e => setQuestion(e.target.value)}
@@ -535,17 +670,6 @@ export default function AgentDetail() {
                 {chatLoading ? '...' : 'Ask'}
               </button>
             </form>
-
-            {chatLoading && (
-              <p className="text-sm text-gray-400 animate-pulse">Thinking...</p>
-            )}
-
-            {answer && (
-              <div className="bg-gray-50 border border-gray-100 rounded-xl px-6 py-4">
-                <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Answer</p>
-                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{answer}</p>
-              </div>
-            )}
           </div>
         )}
 
@@ -577,9 +701,39 @@ export default function AgentDetail() {
               </div>
             </div>
 
+            {/* Explicación en lenguaje sencillo */}
+            <div className="bg-blue-50 border border-blue-100 rounded-xl px-5 py-4">
+              <p className="text-sm font-medium text-blue-800 mb-2">How to use this</p>
+              <p className="text-sm text-blue-700 leading-relaxed">
+                This lets you talk to this agent from outside this website — for example from
+                another app, a script, or an automation tool like n8n or Postman.
+                Send a request to the URL below with your question, and you'll get the agent's
+                answer back.
+              </p>
+              {apiKeyRequired && (
+                <p className="text-sm text-blue-700 leading-relaxed mt-2">
+                  Since protection is enabled, every request must also include a header named{' '}
+                  <code className="bg-blue-100 px-1 rounded">X-API-Key</code> with the value of one
+                  of the keys generated below — think of it as a password that proves the request
+                  is allowed to use this agent. Without it (or with a wrong/deleted key), the
+                  request will be rejected.
+                </p>
+              )}
+            </div>
+
             {/* Documentación del endpoint */}
             <div>
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Endpoint</p>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Endpoint</p>
+                <a
+                  href={`/docs/${id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs bg-orange-400 hover:bg-orange-500 text-white px-3 py-1.5 rounded-lg transition"
+                >
+                  Try →
+                </a>
+              </div>
               <div className="bg-gray-50 border border-gray-100 rounded-xl px-5 py-4 space-y-3 font-mono text-xs text-gray-600">
                 <p><span className="text-orange-500 font-semibold">POST</span> <span className="text-gray-800">/api/public/agents/{id}/chat</span></p>
                 <div>
@@ -650,6 +804,95 @@ export default function AgentDetail() {
               )}
             </div>
 
+          </div>
+        )}
+
+        {/* ── ADVANCED ── */}
+        {activeTab === 'Advanced' && (
+          <div className="space-y-5">
+            <p className="text-sm text-gray-400">
+              Control how this agent retrieves information from its documents. Changes to chunk
+              size/overlap only affect documents indexed (or re-indexed) after saving.
+            </p>
+
+            <div>
+              <label htmlFor="top-k-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+                Top K (chunks retrieved per question)
+              </label>
+              <input
+                id="top-k-input"
+                type="number"
+                min="1"
+                max="50"
+                value={topK}
+                onChange={e => setTopK(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+              />
+              <p className="text-xs text-gray-400 mt-1">How many document chunks are fed to the LLM as context for each question.</p>
+            </div>
+
+            <div>
+              <label htmlFor="chunk-size-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+                Chunk size
+              </label>
+              <input
+                id="chunk-size-input"
+                type="number"
+                min="50"
+                max="8000"
+                value={chunkSize}
+                onChange={e => setChunkSize(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+              />
+              <p className="text-xs text-gray-400 mt-1">Size (in tokens) of each piece a document is split into when indexed.</p>
+            </div>
+
+            <div>
+              <label htmlFor="chunk-overlap-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+                Chunk overlap
+              </label>
+              <input
+                id="chunk-overlap-input"
+                type="number"
+                min="0"
+                max="4000"
+                value={chunkOverlap}
+                onChange={e => setChunkOverlap(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+              />
+              <p className="text-xs text-gray-400 mt-1">How many tokens consecutive chunks share, to avoid cutting context at the boundary.</p>
+            </div>
+
+            <div>
+              <label htmlFor="temperature-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+                Temperature
+              </label>
+              <input
+                id="temperature-input"
+                type="number"
+                min="0"
+                max="2"
+                step="0.1"
+                value={temperature}
+                onChange={e => setTemperature(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                How much randomness the LLM uses when writing the answer. Lower (e.g. 0) gives
+                consistent, fact-focused answers; higher gives more varied, creative ones.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              {advancedSaveMsg && <span className="text-sm text-gray-400">{advancedSaveMsg}</span>}
+              <button
+                onClick={handleSaveAdvanced}
+                disabled={savingAdvanced}
+                className="bg-orange-400 hover:bg-orange-500 text-white text-sm font-medium px-5 py-2 rounded-lg transition disabled:opacity-50"
+              >
+                {savingAdvanced ? 'Saving...' : 'Save'}
+              </button>
+            </div>
           </div>
         )}
 

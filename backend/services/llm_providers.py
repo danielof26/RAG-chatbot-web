@@ -7,12 +7,16 @@ class LLMProvider(ABC):
     REQUIRED_FIELDS = []  # campos que el usuario debe rellenar al crear este tipo de servidor
 
     @abstractmethod
-    def build_llm(self, model: str, system_prompt: str = ''):
+    def build_llm(self, model: str, system_prompt: str = '', temperature: float = None):
         """Devuelve una instancia LLM de LlamaIndex lista para usar."""
 
     @abstractmethod
     def get_models(self) -> list:
         """Devuelve los modelos disponibles en este proveedor."""
+
+    @abstractmethod
+    def build_embedding(self, model: str):
+        """Devuelve una instancia de embeddings de LlamaIndex lista para usar."""
 
     def validate(self) -> bool:
         """Comprueba que el servidor es alcanzable. Por defecto, se asume válido."""
@@ -25,14 +29,14 @@ class OllamaProvider(LLMProvider):
     def __init__(self, base_url: str, **_):
         self.base_url = base_url.rstrip('/')
 
-    def build_llm(self, model: str, system_prompt: str = ''):
+    def build_llm(self, model: str, system_prompt: str = '', temperature: float = None):
         return Ollama(
             model=model,
             base_url=self.base_url,
             request_timeout=600.0,
             system_prompt=system_prompt or None,
             context_window=8000,
-            temperature=0.1
+            temperature=temperature if temperature is not None else 0.1
         )
 
     def get_models(self) -> list:
@@ -42,6 +46,10 @@ class OllamaProvider(LLMProvider):
             return [m['name'] for m in resp.json().get('models', [])]
         except Exception:
             return []
+
+    def build_embedding(self, model: str):
+        from llama_index.embeddings.ollama import OllamaEmbedding
+        return OllamaEmbedding(model_name=model, base_url=self.base_url)
 
     def validate(self) -> bool:
         try:
@@ -62,16 +70,21 @@ class GeminiProvider(LLMProvider):
     def __init__(self, api_key: str, **_):
         self.api_key = api_key
 
-    def build_llm(self, model: str, system_prompt: str = ''):
+    def build_llm(self, model: str, system_prompt: str = '', temperature: float = None):
         from llama_index.llms.gemini import Gemini
         return Gemini(
             model=model,
             api_key=self.api_key,
-            system_prompt=system_prompt or None
+            system_prompt=system_prompt or None,
+            temperature=temperature if temperature is not None else 0.1
         )
 
     def get_models(self) -> list:
         return self.AVAILABLE_MODELS
+
+    def build_embedding(self, model: str):
+        from llama_index.embeddings.gemini import GeminiEmbedding
+        return GeminiEmbedding(model_name=model, api_key=self.api_key)
 
 
 class OpenAILikeProvider(LLMProvider):
@@ -81,13 +94,13 @@ class OpenAILikeProvider(LLMProvider):
         self.base_url = base_url.rstrip('/')
         self.api_key = api_key
 
-    def build_llm(self, model: str, system_prompt: str = ''):
+    def build_llm(self, model: str, system_prompt: str = '', temperature: float = None):
         from llama_index.llms.openai_like import OpenAILike
         return OpenAILike(
             model=model,
             api_key=self.api_key,
             api_base=self.base_url,
-            temperature=0.1,
+            temperature=temperature if temperature is not None else 0.1,
             system_prompt=system_prompt or None,
             is_chat_model=True,
             context_window=8000,
@@ -104,6 +117,10 @@ class OpenAILikeProvider(LLMProvider):
             return [m['id'] for m in resp.json().get('data', [])]
         except Exception:
             return []
+
+    def build_embedding(self, model: str):
+        from llama_index.embeddings.openai import OpenAIEmbedding
+        return OpenAIEmbedding(model=model, api_key=self.api_key, api_base=self.base_url)
 
     def validate(self) -> bool:
         try:
