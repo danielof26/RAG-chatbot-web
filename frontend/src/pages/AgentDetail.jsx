@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
-const TABS = ['Settings', 'Documents', 'Chat', 'API', 'Advanced']
+const TABS = ['Settings', 'Documents', 'Chat', 'API', 'Advanced', 'Evaluation']
 
 export default function AgentDetail() {
   const { id } = useParams()
@@ -57,6 +57,20 @@ export default function AgentDetail() {
   const [uploadMsg, setUploadMsg] = useState('')
   const [indexingMsg, setIndexingMsg] = useState('')
 
+  // Evaluation
+  const [snapshots, setSnapshots] = useState([])
+  const [newSnapshotName, setNewSnapshotName] = useState('')
+  const [evalSnapshotId, setEvalSnapshotId] = useState('')
+  const [evalLanguage, setEvalLanguage] = useState('en')
+  const [evalNExec, setEvalNExec] = useState(3)
+  const [evalXai, setEvalXai] = useState(false)
+  const [runningEval, setRunningEval] = useState(false)
+  const [evalMsg, setEvalMsg] = useState('')
+  const [evalRuns, setEvalRuns] = useState([])
+  const [expandedRunId, setExpandedRunId] = useState('')
+  const [expandedRunDetail, setExpandedRunDetail] = useState(null)
+  const evalFileRef = useRef()
+
   // Chat
   const [question, setQuestion] = useState('')
   const [messages, setMessages] = useState([])
@@ -69,6 +83,17 @@ export default function AgentDetail() {
   useEffect(() => { if (activeTab === 'API') fetchApiKeys() }, [activeTab])
   useEffect(() => { if (activeTab === 'Chat') fetchChatHistory() }, [activeTab])
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+  useEffect(() => {
+    if (activeTab === 'Evaluation') { fetchSnapshots(); fetchEvalRuns() }
+  }, [activeTab])
+
+  // Auto-refresh mientras haya alguna evaluación en curso (rápido, para mostrar avance paso a paso)
+  useEffect(() => {
+    const hasRunning = evalRuns.some(r => r.status === 'running')
+    if (!hasRunning) return
+    const interval = setInterval(fetchEvalRuns, 3000)
+    return () => clearInterval(interval)
+  }, [evalRuns])
 
   // Cuando cambia el servidor seleccionado, carga sus modelos
   useEffect(() => {
@@ -293,6 +318,90 @@ export default function AgentDetail() {
     setSavingAdvanced(false)
     setAdvancedSaveMsg(res.ok ? 'Saved!' : 'Error saving')
     if (res.ok) setTimeout(() => setAdvancedSaveMsg(''), 2000)
+  }
+
+  const fetchSnapshots = async () => {
+    const res = await fetch(`/api/agents/${id}/config-snapshots`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    if (res.ok) setSnapshots(await res.json())
+  }
+
+  const handleCreateSnapshot = async () => {
+    await fetch(`/api/agents/${id}/config-snapshots`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ name: newSnapshotName.trim() || undefined })
+    })
+    setNewSnapshotName('')
+    await fetchSnapshots()
+  }
+
+  const handleDeleteSnapshot = async (snapshotId) => {
+    if (!globalThis.confirm('Delete this saved configuration? This cannot be undone.')) return
+    await fetch(`/api/agents/${id}/config-snapshots/${snapshotId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    await fetchSnapshots()
+  }
+
+  const fetchEvalRuns = async () => {
+    const res = await fetch(`/api/agents/${id}/evaluations`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    if (res.ok) setEvalRuns(await res.json())
+  }
+
+  const handleRunEvaluation = async (e) => {
+    e.preventDefault()
+    const file = evalFileRef.current.files[0]
+    if (!file || !evalSnapshotId) return
+
+    setRunningEval(true)
+    setEvalMsg('')
+    const form = new FormData()
+    form.append('file', file)
+    form.append('snapshot_id', evalSnapshotId)
+    form.append('language', evalLanguage)
+    form.append('n_exec', evalNExec)
+    form.append('xai', evalXai)
+
+    const res = await fetch(`/api/agents/${id}/evaluations`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form
+    })
+    const data = await res.json()
+    setRunningEval(false)
+    setEvalMsg(res.ok ? 'Evaluation started — it will appear below once finished.' : (data.error || 'Error starting evaluation'))
+    if (res.ok) {
+      evalFileRef.current.value = ''
+      await fetchEvalRuns()
+    }
+  }
+
+  const handleToggleRunDetail = async (runId) => {
+    if (expandedRunId === runId) {
+      setExpandedRunId('')
+      setExpandedRunDetail(null)
+      return
+    }
+    setExpandedRunId(runId)
+    const res = await fetch(`/api/agents/${id}/evaluations/${runId}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    if (res.ok) setExpandedRunDetail(await res.json())
+  }
+
+  const handleDeleteRun = async (runId) => {
+    if (!globalThis.confirm('Delete this evaluation run? This cannot be undone.')) return
+    await fetch(`/api/agents/${id}/evaluations/${runId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    if (expandedRunId === runId) { setExpandedRunId(''); setExpandedRunDetail(null) }
+    await fetchEvalRuns()
   }
 
   const fetchChatHistory = async () => {
@@ -893,6 +1002,225 @@ export default function AgentDetail() {
                 {savingAdvanced ? 'Saving...' : 'Save'}
               </button>
             </div>
+          </div>
+        )}
+
+        {/* ── EVALUATION ── */}
+        {activeTab === 'Evaluation' && (
+          <div className="space-y-8">
+
+            {/* Configuraciones guardadas */}
+            <div>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Saved configurations</p>
+              <div className="flex gap-2 mb-4">
+                <input
+                  value={newSnapshotName}
+                  onChange={e => setNewSnapshotName(e.target.value)}
+                  placeholder="Configuration name (optional)"
+                  className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+                />
+                <button
+                  onClick={handleCreateSnapshot}
+                  className="bg-orange-400 hover:bg-orange-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
+                >
+                  + Save current configuration
+                </button>
+              </div>
+              {snapshots.length === 0 ? (
+                <p className="text-sm text-gray-300">No saved configurations yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {snapshots.map(s => (
+                    <div key={s._id} className="flex items-center justify-between border border-gray-100 rounded-lg px-4 py-3">
+                      <div>
+                        <p className="text-sm text-gray-700">{s.name}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          top_k={s.rag_config?.similarity_top_k} · chunk={s.rag_config?.chunk_size}/{s.rag_config?.chunk_overlap} · temp={s.rag_config?.temperature} · {s.llm_model || 'default model'}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteSnapshot(s._id)}
+                        className="text-xs text-red-400 hover:text-red-500 transition"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Lanzar evaluación */}
+            <div>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Run evaluation</p>
+              <form onSubmit={handleRunEvaluation} className="space-y-3 border border-gray-100 rounded-xl px-5 py-4">
+
+                <div>
+                  <label htmlFor="eval-snapshot-select" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Configuration to test</label>
+                  <select
+                    id="eval-snapshot-select"
+                    value={evalSnapshotId}
+                    onChange={e => setEvalSnapshotId(e.target.value)}
+                    required
+                    className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 bg-white"
+                  >
+                    <option value="">— Select a saved configuration —</option>
+                    {snapshots.map(s => (
+                      <option key={s._id} value={s._id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label htmlFor="eval-csv-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Questions dataset (.csv)</label>
+                  <input
+                    id="eval-csv-input"
+                    type="file"
+                    accept=".csv"
+                    ref={evalFileRef}
+                    required
+                    className="w-full text-sm"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Columns separated by semicolons: Question;Keywords;Answer (Answer is optional).
+                  </p>
+                </div>
+
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <label htmlFor="eval-language-select" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Language</label>
+                    <select
+                      id="eval-language-select"
+                      value={evalLanguage}
+                      onChange={e => setEvalLanguage(e.target.value)}
+                      className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 bg-white"
+                    >
+                      <option value="en">English</option>
+                      <option value="es">Español</option>
+                    </select>
+                  </div>
+                  <div className="flex-1">
+                    <label htmlFor="eval-nexec-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Repetitions per question</label>
+                    <input
+                      id="eval-nexec-input"
+                      type="number"
+                      min="1"
+                      max="10"
+                      value={evalNExec}
+                      onChange={e => setEvalNExec(e.target.value)}
+                      className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    id="eval-xai-checkbox"
+                    type="checkbox"
+                    checked={evalXai}
+                    onChange={e => setEvalXai(e.target.checked)}
+                    className="w-4 h-4 accent-orange-400"
+                  />
+                  <label htmlFor="eval-xai-checkbox" className="text-sm text-gray-600">
+                    XAI mode — check citations and detect hallucinations (slower, more LLM calls per question)
+                  </label>
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-2">
+                  {evalMsg && <span className="text-sm text-gray-400">{evalMsg}</span>}
+                  <button
+                    type="submit"
+                    disabled={runningEval}
+                    className="bg-orange-400 hover:bg-orange-500 text-white text-sm font-medium px-5 py-2 rounded-lg transition disabled:opacity-50"
+                  >
+                    {runningEval ? 'Starting...' : 'Run evaluation'}
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* Historial */}
+            <div>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">History</p>
+              {evalRuns.length === 0 ? (
+                <p className="text-sm text-gray-300">No evaluations run yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {evalRuns.map(r => (
+                    <div key={r._id} className="border border-gray-100 rounded-lg">
+                      <div className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleRunDetail(r._id)}
+                          className="flex-1 text-left"
+                        >
+                          <p className="text-sm font-medium text-gray-700">{r.snapshot_name}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            {r.num_questions} questions · {r.n_exec}x · {r.xai ? 'XAI' : 'naive'} · {new Date(r.created_at).toLocaleString()}
+                          </p>
+                          {r.status === 'running' && r.progress && (
+                            <p className="text-xs text-orange-500 mt-1 animate-pulse">
+                              {r.progress.phase === 'indexing'
+                                ? 'Indexing documents...'
+                                : `Step ${r.progress.step}/${r.progress.total} — question ${r.progress.question_num}/${r.progress.n_questions}, run ${r.progress.exec_num}/${r.progress.n_exec}: "${r.progress.question}"`}
+                            </p>
+                          )}
+                        </button>
+                        <div className="flex items-center gap-3">
+                          {r.status === 'running' && <span className="text-xs text-orange-500 bg-orange-50 px-2 py-1 rounded-full animate-pulse">Running...</span>}
+                          {r.status === 'error' && <span className="text-xs text-red-400 bg-red-50 px-2 py-1 rounded-full">Error</span>}
+                          {r.status === 'done' && r.global_results && (
+                            <span className="text-xs text-green-600 bg-green-50 px-2 py-1 rounded-full">
+                              Score {r.global_results.score.mean}
+                            </span>
+                          )}
+                          <button
+                            onClick={() => handleDeleteRun(r._id)}
+                            className="text-xs text-red-400 hover:text-red-500 transition"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+
+                      {expandedRunId === r._id && expandedRunDetail && (
+                        <div className="border-t border-gray-100 px-4 py-3 bg-gray-50 space-y-3">
+                          {r.status === 'error' && (
+                            <p className="text-sm text-red-500">{expandedRunDetail.error}</p>
+                          )}
+                          {r.status === 'done' && expandedRunDetail.results && (
+                            <>
+                              <div className="text-xs text-gray-600 grid grid-cols-2 gap-2">
+                                <p>Mean score: <b>{expandedRunDetail.results.global.score.mean}</b> (min {expandedRunDetail.results.global.score.min}, max {expandedRunDetail.results.global.score.max})</p>
+                                {expandedRunDetail.results.global.avg_rouge1 != null && (
+                                  <p>ROUGE-1/2/L: {expandedRunDetail.results.global.avg_rouge1} / {expandedRunDetail.results.global.avg_rouge2} / {expandedRunDetail.results.global.avg_rougeL}</p>
+                                )}
+                                {r.xai && (
+                                  <p>Avg. hallucinations: {expandedRunDetail.results.global.avg_hallucinations}</p>
+                                )}
+                                <p>Time: {expandedRunDetail.results.global.time_seconds}s</p>
+                              </div>
+                              <div className="space-y-2">
+                                {expandedRunDetail.results.per_question.map((pq) => (
+                                  <div key={pq.question} className="bg-white border border-gray-100 rounded-lg px-3 py-2">
+                                    <p className="text-xs font-medium text-gray-700">{pq.question}</p>
+                                    <p className="text-xs text-gray-400 mt-1">{pq.last_answer}</p>
+                                    <p className="text-xs text-gray-500 mt-1">
+                                      Score: {pq.score.mean} {pq.rouge1_mean != null && `· ROUGE-1 ${pq.rouge1_mean}`} {r.xai && `· Hallucinations ${pq.hallucinations_mean}`}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
           </div>
         )}
 
