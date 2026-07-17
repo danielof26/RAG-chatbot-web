@@ -1,6 +1,43 @@
 from abc import ABC, abstractmethod
+from typing import Any, List
+
 import requests
+from llama_index.core.bridge.pydantic import PrivateAttr
+from llama_index.core.embeddings import BaseEmbedding
 from llama_index.llms.ollama import Ollama
+
+
+class _FlexOpenAIEmbedding(BaseEmbedding):
+    """Embedding for OpenAI-compatible APIs — accepts any model name without validation."""
+    _base_url: str = PrivateAttr()
+    _headers: Any = PrivateAttr()
+
+    def __init__(self, model: str, api_key: str, api_base: str, **kwargs):
+        super().__init__(model_name=model, **kwargs)
+        self._base_url = (api_base if api_base.endswith('/v1') else f"{api_base}/v1") + '/embeddings'
+        self._headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
+
+    def _embed(self, text: str) -> List[float]:
+        resp = requests.post(
+            self._base_url,
+            headers=self._headers,
+            json={'model': self.model_name, 'input': text},
+            timeout=120
+        )
+        resp.raise_for_status()
+        return resp.json()['data'][0]['embedding']
+
+    def _get_query_embedding(self, query: str) -> List[float]:
+        return self._embed(query)
+
+    def _get_text_embedding(self, text: str) -> List[float]:
+        return self._embed(text)
+
+    async def _aget_query_embedding(self, query: str) -> List[float]:
+        return self._embed(query)
+
+    async def _aget_text_embedding(self, text: str) -> List[float]:
+        return self._embed(text)
 
 
 class LLMProvider(ABC):
@@ -119,8 +156,7 @@ class OpenAILikeProvider(LLMProvider):
             return []
 
     def build_embedding(self, model: str):
-        from llama_index.embeddings.openai import OpenAIEmbedding
-        return OpenAIEmbedding(model=model, api_key=self.api_key, api_base=self.base_url)
+        return _FlexOpenAIEmbedding(model=model, api_key=self.api_key, api_base=self.base_url)
 
     def validate(self) -> bool:
         try:

@@ -5,6 +5,7 @@ import chromadb
 from llama_index.vector_stores.chroma import ChromaVectorStore
 import config
 from services.llm_providers import get_provider
+from services.query_strategies import get_query_strategy
 
 
 def _resolve_server(agent_config: dict):
@@ -111,14 +112,17 @@ def query_agent(agent_id: str, question: str, agent_config: dict) -> str:
     if chroma_collection.count() == 0:
         return "This agent has no knowledge documents yet. Upload a document first."
 
-    top_k = agent_config.get('rag_config', {}).get('similarity_top_k', 5)
+    rag_config = agent_config.get('rag_config', {})
+    top_k = rag_config.get('similarity_top_k', 5)
+    retrieval_mode = rag_config.get('retrieval_mode', 'naive')
 
     index = VectorStoreIndex.from_vector_store(
         vector_store,
         storage_context=storage_context
     )
     query_engine = index.as_query_engine(similarity_top_k=top_k)
-    response = query_engine.query(question)
+    query = get_query_strategy(retrieval_mode).build_query(question, Settings.llm)
+    response = query_engine.query(query)
     return str(response).strip()
 
 
@@ -135,14 +139,17 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict):
         yield "This agent has no knowledge documents yet. Upload a document first."
         return
 
-    top_k = agent_config.get('rag_config', {}).get('similarity_top_k', 5)
+    rag_config = agent_config.get('rag_config', {})
+    top_k = rag_config.get('similarity_top_k', 5)
+    retrieval_mode = rag_config.get('retrieval_mode', 'naive')
 
     index = VectorStoreIndex.from_vector_store(
         vector_store,
         storage_context=storage_context
     )
     query_engine = index.as_query_engine(similarity_top_k=top_k, streaming=True)
-    streaming_response = query_engine.query(question)
+    query = get_query_strategy(retrieval_mode).build_query(question, Settings.llm)
+    streaming_response = query_engine.query(query)
 
     for token in streaming_response.response_gen:
         yield token

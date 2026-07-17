@@ -1,8 +1,9 @@
 import re
 import chromadb
-from llama_index.core import VectorStoreIndex, Settings, SimpleDirectoryReader, StorageContext
+from llama_index.core import VectorStoreIndex, Settings, SimpleDirectoryReader, StorageContext, QueryBundle
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.vector_stores.chroma import ChromaVectorStore
+from services.query_strategies import get_query_strategy
 
 _TRACE_SEP = "=" * 80
 
@@ -200,7 +201,7 @@ def _write_xai_trace(log_path: str, exec_num: int, q_idx: int, question: str,
 
 
 def run_rag(query_engine, questions, architecture="naive", llm=None,
-            xai_log_path=None, exec_num=1):
+            xai_log_path=None, exec_num=1, retrieval_mode='naive'):
     """
     Returns list of (answer, hallucinations_count) tuples.
 
@@ -216,14 +217,21 @@ def run_rag(query_engine, questions, architecture="naive", llm=None,
         # ─── FASE 1: User Query ───────────────────────────────────────────
         # ─── FASE 2: Document Retrieval ──────────────────────────────────
         # ─── FASE 3: Transparent Response Generation ─────────────────────
-        question_text = q["question"]
+        original_question = q["question"]
+        question_text = original_question
         if architecture == "xai":
             question_text += (
                 "\n\nIMPORTANT: For each statement, cite the exact source fragment "
                 "like this: [Source: <verbatim text copied from context>]"
             )
 
-        response       = query_engine.query(question_text)
+        query = get_query_strategy(retrieval_mode).build_query(original_question, llm)
+        if isinstance(query, QueryBundle):
+            # HyDE: keep the HyDE embedding strings but use question_text (may include XAI prompt) for synthesis
+            query = QueryBundle(query_str=question_text, custom_embedding_strs=query.custom_embedding_strs)
+        else:
+            query = question_text
+        response = query_engine.query(query)
         rag_answer     = str(response).strip().replace('\n', ' ').replace(';', ',')
         hallucinations = -1
         citations      = []

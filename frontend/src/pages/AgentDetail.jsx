@@ -49,6 +49,7 @@ export default function AgentDetail() {
   const [chunkSize, setChunkSize] = useState(512)
   const [chunkOverlap, setChunkOverlap] = useState(50)
   const [temperature, setTemperature] = useState(0.1)
+  const [retrievalMode, setRetrievalMode] = useState('naive')
   const [savingAdvanced, setSavingAdvanced] = useState(false)
   const [advancedSaveMsg, setAdvancedSaveMsg] = useState('')
 
@@ -152,6 +153,7 @@ export default function AgentDetail() {
     setChunkSize(data.rag_config?.chunk_size ?? 512)
     setChunkOverlap(data.rag_config?.chunk_overlap ?? 50)
     setTemperature(data.rag_config?.temperature ?? 0.1)
+    setRetrievalMode(data.rag_config?.retrieval_mode ?? 'naive')
     setLoading(false)
   }
 
@@ -311,7 +313,8 @@ export default function AgentDetail() {
           similarity_top_k: Number(topK),
           chunk_size: Number(chunkSize),
           chunk_overlap: Number(chunkOverlap),
-          temperature: Number(temperature)
+          temperature: Number(temperature),
+          retrieval_mode: retrievalMode
         }
       })
     })
@@ -989,6 +992,25 @@ export default function AgentDetail() {
               <p className="text-xs text-gray-400 mt-1">
                 How much randomness the LLM uses when writing the answer. Lower (e.g. 0) gives
                 consistent, fact-focused answers; higher gives more varied, creative ones.
+              </p>
+            </div>
+
+            <div>
+              <label htmlFor="retrieval-mode-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+                Retrieval mode
+              </label>
+              <select
+                id="retrieval-mode-input"
+                value={retrievalMode}
+                onChange={e => setRetrievalMode(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+              >
+                <option value="naive">Naive — retrieve by the question directly</option>
+                <option value="hyde_answer">HyDE Answer — retrieve by a hypothetical answer</option>
+                <option value="hyde_combined">HyDE Combined — retrieve by question + hypothetical answer</option>
+              </select>
+              <p className="text-xs text-gray-400 mt-1">
+                HyDE modes first ask the LLM to generate a hypothetical answer, then use it to find more relevant document chunks.
               </p>
             </div>
 

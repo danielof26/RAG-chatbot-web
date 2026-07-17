@@ -152,7 +152,7 @@ def _build_per_question_results(questions, scores, hallucinations_all, rouge_sco
     return per_question
 
 
-def _execute_questions(run_id: str, query_engine, llm, run: dict, nlp):
+def _execute_questions(run_id: str, query_engine, llm, run: dict, nlp, retrieval_mode: str = 'naive'):
     questions = run['dataset']
     architecture = 'xai' if run['xai'] else 'naive'
     n_exec = run['n_exec']
@@ -178,7 +178,7 @@ def _execute_questions(run_id: str, query_engine, llm, run: dict, nlp):
                 'question': q['question']
             })
 
-            (answer, hallucinations), = run_rag(query_engine, [q], architecture=architecture, llm=llm, exec_num=exec_num)
+            (answer, hallucinations), = run_rag(query_engine, [q], architecture=architecture, llm=llm, exec_num=exec_num, retrieval_mode=retrieval_mode)
             scores[i].append(validate(answer, q['keywords'], nlp))
             hallucinations_all[i].append(hallucinations)
             last_answers[i] = answer
@@ -227,8 +227,9 @@ def run_evaluation(run_id: str):
         nlp = _get_nlp(run['language'])
         query_engine, llm = _build_query_engine(run_id, agent, snapshot, file_paths)
 
+        retrieval_mode = snapshot.get('rag_config', {}).get('retrieval_mode', 'naive')
         start_time = time.time()
-        per_question = _execute_questions(run_id, query_engine, llm, run, nlp)
+        per_question = _execute_questions(run_id, query_engine, llm, run, nlp, retrieval_mode)
         time_seconds = round(time.time() - start_time, 2)
 
         results = {
