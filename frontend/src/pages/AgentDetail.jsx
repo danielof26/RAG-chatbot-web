@@ -1008,9 +1008,11 @@ export default function AgentDetail() {
                 <option value="naive">Naive — retrieve by the question directly</option>
                 <option value="hyde_answer">HyDE Answer — retrieve by a hypothetical answer</option>
                 <option value="hyde_combined">HyDE Combined — retrieve by question + hypothetical answer</option>
+                <option value="crag">CRAG — retrieve, grade chunks, filter irrelevant</option>
               </select>
               <p className="text-xs text-gray-400 mt-1">
                 HyDE modes first ask the LLM to generate a hypothetical answer, then use it to find more relevant document chunks.
+                CRAG grades each retrieved chunk as RELEVANT, AMBIGUOUS, or IRRELEVANT, and filters the irrelevant ones before generating the answer.
               </p>
             </div>
 
@@ -1057,7 +1059,7 @@ export default function AgentDetail() {
                       <div>
                         <p className="text-sm text-gray-700">{s.name}</p>
                         <p className="text-xs text-gray-400 mt-0.5">
-                          top_k={s.rag_config?.similarity_top_k} · chunk={s.rag_config?.chunk_size}/{s.rag_config?.chunk_overlap} · temp={s.rag_config?.temperature} · {s.llm_model || 'default model'}
+                          top_k={s.rag_config?.similarity_top_k} · chunk={s.rag_config?.chunk_size}/{s.rag_config?.chunk_overlap} · temp={s.rag_config?.temperature} · {s.rag_config?.retrieval_mode ?? 'naive'} · {s.llm_model || 'default model'}
                         </p>
                       </div>
                       <button
@@ -1178,7 +1180,7 @@ export default function AgentDetail() {
                         >
                           <p className="text-sm font-medium text-gray-700">{r.snapshot_name}</p>
                           <p className="text-xs text-gray-400 mt-0.5">
-                            {r.num_questions} questions · {r.n_exec}x · {r.xai ? 'XAI' : 'naive'} · {new Date(r.created_at).toLocaleString()}
+                            {r.num_questions} questions · {r.n_exec}x · {r.xai ? 'XAI' : r.retrieval_mode ?? 'naive'} · {new Date(r.created_at).toLocaleString()}
                           </p>
                           {r.status === 'running' && r.progress && (
                             <p className="text-xs text-orange-500 mt-1 animate-pulse">

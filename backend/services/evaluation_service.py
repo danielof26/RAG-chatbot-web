@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 import spacy
 from bson import ObjectId
+from nltk.stem import SnowballStemmer
 from rouge_score import rouge_scorer as rouge_lib
 
 import config
@@ -19,6 +20,10 @@ _NLP_MODELS = {
 }
 _nlp_cache = {}
 _rouge_scorer = rouge_lib.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=False)
+_stemmers = {
+    'es': SnowballStemmer('spanish'),
+    'en': SnowballStemmer('english'),
+}
 
 
 def _get_nlp(language: str):
@@ -28,9 +33,10 @@ def _get_nlp(language: str):
 
 
 def semantics(text: str, nlp) -> list:
-    """Returns the list of lemmas for a given text using spaCy."""
+    """Returns stemmed lemmas for a given text using spaCy + Snowball stemmer."""
+    stemmer = _stemmers.get(nlp.lang, _stemmers['es'])
     doc = nlp(text.lower())
-    return [token.lemma_ for token in doc]
+    return [stemmer.stem(token.lemma_) for token in doc]
 
 
 def validate(rag_answer: str, keys_string: str, nlp) -> float:

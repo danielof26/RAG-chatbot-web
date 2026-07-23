@@ -1,6 +1,6 @@
 import re
 import chromadb
-from llama_index.core import VectorStoreIndex, Settings, SimpleDirectoryReader, StorageContext, QueryBundle
+from llama_index.core import VectorStoreIndex, Settings, SimpleDirectoryReader, StorageContext
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from services.query_strategies import get_query_strategy
@@ -225,14 +225,8 @@ def run_rag(query_engine, questions, architecture="naive", llm=None,
                 "like this: [Source: <verbatim text copied from context>]"
             )
 
-        query = get_query_strategy(retrieval_mode).build_query(original_question, llm)
-        if isinstance(query, QueryBundle):
-            # HyDE: keep the HyDE embedding strings but use question_text (may include XAI prompt) for synthesis
-            query = QueryBundle(query_str=question_text, custom_embedding_strs=query.custom_embedding_strs)
-        else:
-            query = question_text
-        response = query_engine.query(query)
-        rag_answer     = str(response).strip().replace('\n', ' ').replace(';', ',')
+        strategy = get_query_strategy(retrieval_mode)
+        rag_answer, response = strategy.execute(query_engine, original_question, llm, synthesis_question=question_text)
         hallucinations = -1
         citations      = []
 
