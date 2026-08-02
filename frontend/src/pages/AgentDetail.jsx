@@ -5,6 +5,105 @@ import { useAuth } from '../context/AuthContext'
 
 const TABS = ['Settings', 'Documents', 'Chat', 'API', 'Advanced', 'Evaluation']
 
+const RAG_SECTIONS = [
+  {
+    id: 'pre', num: 1,
+    title: 'Pre-retrieval · Query transformation',
+    desc: 'Applied before the retriever to improve semantic matching. All combinable with each other. The Router is exclusive in index selection but can coexist with the rest.',
+    techniques: [
+      { id: 'naive',         label: 'Naive (direct)',        impl: true,  desc: 'Uses the question as-is for retrieval. No transformation applied — the baseline. Compatible with CRAG (which also retrieves naively, then filters).',  incompat: ['hyde_answer', 'hyde_combined'] },
+      { id: 'hyde_answer',   label: 'HyDE Answer',          impl: true,  desc: 'Generates a hypothetical answer and uses its embedding as the retrieval query.',           incompat: ['naive', 'hyde_combined', 'crag'] },
+      { id: 'hyde_combined', label: 'HyDE Combined',        impl: true,  desc: 'Embeds both the original question and a hypothetical answer for retrieval.',               incompat: ['naive', 'hyde_answer',   'crag'] },
+      { id: 'multi_query',   label: 'Multi-Query',          impl: false, desc: 'Generates N reformulations of the question and fuses all results to improve recall.',     incompat: [] },
+      { id: 'step_back',     label: 'Step-back Prompting',  impl: false, desc: 'Abstracts the question to a higher-level concept before retrieving.',                     incompat: [] },
+      { id: 'sub_question',  label: 'Sub-question Engine',  impl: false, desc: 'Decomposes complex questions into sub-questions, each with its own retrieval.',           incompat: [] },
+      { id: 'router',        label: 'Router Query Engine',  impl: false, desc: 'Routes the query to the most suitable index or tool (exclusive index selection).',        incompat: [] },
+    ]
+  },
+  {
+    id: 'idx', num: 2,
+    title: 'Indexing · Knowledge base structure',
+    desc: 'How documents are organized in the index. Choose one per collection — mutually exclusive.',
+    techniques: [
+      { id: 'vector_index',  label: 'Vector Store Index',    impl: true,  desc: 'Dense semantic index — the standard choice for most RAG pipelines.',      incompat: ['summary_index','tree_index','keyword_index','kg_index'] },
+      { id: 'summary_index', label: 'Summary Index (List)',  impl: false, desc: 'Indexes document summaries, useful for high-level summarization queries.', incompat: ['vector_index','tree_index','keyword_index','kg_index'] },
+      { id: 'tree_index',    label: 'Tree Index',            impl: false, desc: 'Hierarchical index built by recursively summarizing chunks up a tree.',    incompat: ['vector_index','summary_index','keyword_index','kg_index'] },
+      { id: 'keyword_index', label: 'Keyword Table Index',   impl: false, desc: 'Keyword-based index, precise for exact-match technical retrieval.',        incompat: ['vector_index','summary_index','tree_index','kg_index'] },
+      { id: 'kg_index',      label: 'Knowledge Graph Index', impl: false, desc: 'Graph-based index for documents with rich entity relationships.',          incompat: ['vector_index','summary_index','tree_index','keyword_index'] },
+    ]
+  },
+  {
+    id: 'ret', num: 3,
+    title: 'Retrieval · Retriever strategy',
+    desc: 'How relevant nodes are searched within the index. All combinable — Fusion is literally dense + sparse together.',
+    techniques: [
+      { id: 'vec_retriever',  label: 'Vector Store (dense)',    impl: true,  desc: 'Semantic similarity search using embeddings — the standard retriever.',     incompat: [] },
+      { id: 'bm25',           label: 'BM25 (sparse/keyword)',   impl: false, desc: 'Classic keyword retrieval — complements dense search for exact terms.',    incompat: [] },
+      { id: 'auto_merging',   label: 'Auto-Merging',            impl: false, desc: 'Merges child chunks into parent when enough siblings are retrieved.',      incompat: [] },
+      { id: 'recursive',      label: 'Recursive Retriever',     impl: false, desc: 'Follows references between nodes recursively to complete context.',       incompat: [] },
+      { id: 'fusion',         label: 'Fusion (dense + sparse)', impl: false, desc: 'Combines vector and BM25 retrievers with reciprocal rank fusion.',        incompat: [] },
+      { id: 'auto_retrieval', label: 'Auto-Retrieval',          impl: false, desc: 'Extracts metadata filters from the query to narrow the search space.',   incompat: [] },
+    ]
+  },
+  {
+    id: 'post', num: 4,
+    title: 'Post-retrieval · Filtering & reranking',
+    desc: 'Applied after retrieval to improve chunk quality. Most are combinable in pipeline — except the two reranking methods, choose one.',
+    techniques: [
+      { id: 'crag',         label: 'CRAG — Corrective RAG',    impl: true,  desc: 'LLM grades each chunk as relevant/ambiguous/irrelevant and filters the irrelevant ones.', incompat: ['rerank_ce','rerank_llm','hyde_answer','hyde_combined'] },
+      { id: 'rerank_ce',    label: 'Reranking (cross-encoder)', impl: false, desc: 'Reranks chunks using a sentence-transformer cross-encoder model.',       incompat: ['crag','rerank_llm'] },
+      { id: 'rerank_llm',   label: 'Reranking (LLM)',          impl: false, desc: 'Reranks chunks by asking the LLM to score each one for relevance.',     incompat: ['crag','rerank_ce'] },
+      { id: 'sim_filter',   label: 'SimilarityPostprocessor',  impl: false, desc: 'Discards chunks whose similarity score is below a set threshold.',       incompat: [] },
+      { id: 'kw_filter',    label: 'KeywordNodePostprocessor', impl: false, desc: 'Filters chunks that do not contain required keywords.',                  incompat: [] },
+      { id: 'prev_next',    label: 'PrevNextNodePostprocessor',impl: false, desc: 'Expands each retrieved chunk with its neighbouring chunks for context.', incompat: [] },
+      { id: 'long_reorder', label: 'LongContextReorder',       impl: false, desc: 'Reorders chunks to place the most relevant at start and end of prompt.',incompat: [] },
+    ]
+  },
+  {
+    id: 'syn', num: 5,
+    title: 'Response synthesis',
+    desc: 'How retrieved chunks are assembled into the final answer. Choose one — mutually exclusive.',
+    techniques: [
+      { id: 'compact',    label: 'Compact (default)', impl: true,  desc: 'Packs chunks into the fewest possible LLM prompts before generating.',            incompat: ['refine','tree_sum','simple_sum','accumulate'] },
+      { id: 'refine',     label: 'Refine',            impl: false, desc: 'Iteratively refines the answer chunk by chunk.',                                  incompat: ['compact','tree_sum','simple_sum','accumulate'] },
+      { id: 'tree_sum',   label: 'Tree Summarize',    impl: false, desc: 'Builds a summary tree bottom-up — best for very long documents.',                 incompat: ['compact','refine','simple_sum','accumulate'] },
+      { id: 'simple_sum', label: 'Simple Summarize',  impl: false, desc: 'Truncates all chunks into a single prompt — fastest but may lose information.',  incompat: ['compact','refine','tree_sum','accumulate'] },
+      { id: 'accumulate', label: 'Accumulate',        impl: false, desc: 'Generates an answer per chunk independently, then combines them.',                incompat: ['compact','refine','tree_sum','simple_sum'] },
+    ]
+  },
+  {
+    id: 'chunk', num: 6,
+    title: 'Chunking · Document preprocessing',
+    desc: 'How documents are split before indexing. Choose one. Changes apply only when re-indexing.',
+    techniques: [
+      { id: 'fixed_size',     label: 'Fixed-size',            impl: true,  desc: 'Splits by token count. Configure size and overlap in the fields below.',    incompat: ['sent_window','semantic_chunk','hierarchical'] },
+      { id: 'sent_window',    label: 'Sentence window',       impl: false, desc: 'Chunks by sentence and retrieves with a surrounding context window.',       incompat: ['fixed_size','semantic_chunk','hierarchical'] },
+      { id: 'semantic_chunk', label: 'Semantic chunking',     impl: false, desc: 'Splits at semantic boundaries detected by embedding similarity.',           incompat: ['fixed_size','sent_window','hierarchical'] },
+      { id: 'hierarchical',   label: 'Hierarchical chunking', impl: false, desc: 'Creates chunks at multiple granularity levels (parent + child nodes).',    incompat: ['fixed_size','sent_window','semantic_chunk'] },
+    ]
+  },
+]
+
+const DEFAULT_TECHS = new Set(['vector_index', 'vec_retriever', 'fixed_size', 'compact'])
+
+const MODE_TECHS = {
+  naive:         ['naive'],
+  crag:          ['naive', 'crag'],
+  hyde_answer:   ['hyde_answer'],
+  hyde_combined: ['hyde_combined'],
+}
+
+const initTechsFromMode = (mode) => {
+  const t = new Set(DEFAULT_TECHS)
+  ;(MODE_TECHS[mode] ?? ['naive']).forEach(id => t.add(id))
+  return t
+}
+
+const MODE_PRIORITY = ['crag', 'hyde_combined', 'hyde_answer', 'naive']
+
+const computeRetrievalMode = (techs) =>
+  MODE_PRIORITY.find(mode => techs.has(mode)) ?? 'naive'
+
 export default function AgentDetail() {
   const { id } = useParams()
   const { token } = useAuth()
@@ -49,7 +148,7 @@ export default function AgentDetail() {
   const [chunkSize, setChunkSize] = useState(512)
   const [chunkOverlap, setChunkOverlap] = useState(50)
   const [temperature, setTemperature] = useState(0.1)
-  const [retrievalMode, setRetrievalMode] = useState('naive')
+  const [selectedTechs, setSelectedTechs] = useState(() => initTechsFromMode('naive'))
   const [savingAdvanced, setSavingAdvanced] = useState(false)
   const [advancedSaveMsg, setAdvancedSaveMsg] = useState('')
 
@@ -70,6 +169,7 @@ export default function AgentDetail() {
   const [evalRuns, setEvalRuns] = useState([])
   const [expandedRunId, setExpandedRunId] = useState('')
   const [expandedRunDetail, setExpandedRunDetail] = useState(null)
+  const [chartHoveredIdx, setChartHoveredIdx] = useState(null)
   const evalFileRef = useRef()
 
   // Chat
@@ -153,7 +253,7 @@ export default function AgentDetail() {
     setChunkSize(data.rag_config?.chunk_size ?? 512)
     setChunkOverlap(data.rag_config?.chunk_overlap ?? 50)
     setTemperature(data.rag_config?.temperature ?? 0.1)
-    setRetrievalMode(data.rag_config?.retrieval_mode ?? 'naive')
+    setSelectedTechs(initTechsFromMode(data.rag_config?.retrieval_mode ?? 'naive'))
     setLoading(false)
   }
 
@@ -314,7 +414,7 @@ export default function AgentDetail() {
           chunk_size: Number(chunkSize),
           chunk_overlap: Number(chunkOverlap),
           temperature: Number(temperature),
-          retrieval_mode: retrievalMode
+          retrieval_mode: computeRetrievalMode(selectedTechs)
         }
       })
     })
@@ -446,6 +546,27 @@ export default function AgentDetail() {
     const data = await res.json()
     setChatLoading(false)
     setMessages(prev => [...prev, { role: 'assistant', content: res.ok ? data.answer : data.error, key: `${Date.now()}-${Math.random().toString(36).slice(2)}` }])
+  }
+
+  const blockedTechs = new Set()
+  RAG_SECTIONS.forEach(s => s.techniques.forEach(t => {
+    if (selectedTechs.has(t.id)) t.incompat.forEach(id => blockedTechs.add(id))
+  }))
+
+  const toggleTech = (techId) => {
+    if (DEFAULT_TECHS.has(techId)) return
+    let tech = null
+    for (const s of RAG_SECTIONS) {
+      const found = s.techniques.find(t => t.id === techId)
+      if (found) { tech = found; break }
+    }
+    if (!tech?.impl) return
+    setSelectedTechs(prev => {
+      const next = new Set(prev)
+      if (next.has(techId)) { next.delete(techId) }
+      else { tech.incompat.forEach(id => next.delete(id)); next.add(techId) }
+      return next
+    })
   }
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-sm text-gray-400">Loading...</div>
@@ -921,100 +1042,122 @@ export default function AgentDetail() {
 
         {/* ── ADVANCED ── */}
         {activeTab === 'Advanced' && (
-          <div className="space-y-5">
-            <p className="text-sm text-gray-400">
-              Control how this agent retrieves information from its documents. Changes to chunk
-              size/overlap only affect documents indexed (or re-indexed) after saving.
-            </p>
+          <div className="space-y-4">
 
-            <div>
-              <label htmlFor="top-k-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-                Top K (chunks retrieved per question)
-              </label>
-              <input
-                id="top-k-input"
-                type="number"
-                min="1"
-                max="50"
-                value={topK}
-                onChange={e => setTopK(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
-              />
-              <p className="text-xs text-gray-400 mt-1">How many document chunks are fed to the LLM as context for each question.</p>
-            </div>
+            {RAG_SECTIONS.map(section => (
+              <div key={section.id} className="border border-gray-100 rounded-xl px-5 py-4 space-y-3">
 
-            <div>
-              <label htmlFor="chunk-size-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-                Chunk size
-              </label>
-              <input
-                id="chunk-size-input"
-                type="number"
-                min="50"
-                max="8000"
-                value={chunkSize}
-                onChange={e => setChunkSize(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
-              />
-              <p className="text-xs text-gray-400 mt-1">Size (in tokens) of each piece a document is split into when indexed.</p>
-            </div>
+                {/* Section header */}
+                <div className="flex items-center gap-2">
+                  <span className="flex items-center justify-center w-5 h-5 rounded-full bg-orange-50 text-orange-400 text-[10px] font-bold shrink-0">
+                    {section.num}
+                  </span>
+                  <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">{section.title}</p>
+                </div>
 
-            <div>
-              <label htmlFor="chunk-overlap-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-                Chunk overlap
-              </label>
-              <input
-                id="chunk-overlap-input"
-                type="number"
-                min="0"
-                max="4000"
-                value={chunkOverlap}
-                onChange={e => setChunkOverlap(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
-              />
-              <p className="text-xs text-gray-400 mt-1">How many tokens consecutive chunks share, to avoid cutting context at the boundary.</p>
-            </div>
+                <p className="text-xs text-gray-400 leading-relaxed">{section.desc}</p>
 
-            <div>
-              <label htmlFor="temperature-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-                Temperature
-              </label>
-              <input
-                id="temperature-input"
-                type="number"
-                min="0"
-                max="2"
-                step="0.1"
-                value={temperature}
-                onChange={e => setTemperature(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
-              />
-              <p className="text-xs text-gray-400 mt-1">
-                How much randomness the LLM uses when writing the answer. Lower (e.g. 0) gives
-                consistent, fact-focused answers; higher gives more varied, creative ones.
-              </p>
-            </div>
+                {/* Technique pills */}
+                <div className="flex flex-wrap gap-2">
+                  {section.techniques.map(tech => {
+                    const selected  = selectedTechs.has(tech.id)
+                    const blocked   = !selected && blockedTechs.has(tech.id)
+                    const isDefault = DEFAULT_TECHS.has(tech.id)
+                    const clickable = tech.impl && !blocked && !isDefault
 
-            <div>
-              <label htmlFor="retrieval-mode-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-                Retrieval mode
-              </label>
-              <select
-                id="retrieval-mode-input"
-                value={retrievalMode}
-                onChange={e => setRetrievalMode(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
-              >
-                <option value="naive">Naive — retrieve by the question directly</option>
-                <option value="hyde_answer">HyDE Answer — retrieve by a hypothetical answer</option>
-                <option value="hyde_combined">HyDE Combined — retrieve by question + hypothetical answer</option>
-                <option value="crag">CRAG — retrieve, grade chunks, filter irrelevant</option>
-              </select>
-              <p className="text-xs text-gray-400 mt-1">
-                HyDE modes first ask the LLM to generate a hypothetical answer, then use it to find more relevant document chunks.
-                CRAG grades each retrieved chunk as RELEVANT, AMBIGUOUS, or IRRELEVANT, and filters the irrelevant ones before generating the answer.
-              </p>
-            </div>
+                    let cls = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors '
+                    if (selected && isDefault) cls += 'bg-orange-50 text-orange-400 border-orange-100 cursor-default'
+                    else if (selected)         cls += 'bg-orange-400 text-white border-orange-400 hover:bg-orange-500'
+                    else if (blocked)          cls += 'bg-white text-gray-300 border-gray-100 cursor-not-allowed opacity-40'
+                    else if (!tech.impl)       cls += 'bg-white text-gray-300 border-dashed border-gray-200 cursor-not-allowed'
+                    else                       cls += 'bg-white text-gray-600 border-gray-200 hover:border-orange-300 hover:text-orange-500 cursor-pointer'
+
+                    return (
+                      <button
+                        key={tech.id}
+                        title={tech.desc}
+                        onClick={() => clickable && toggleTech(tech.id)}
+                        className={cls}
+                        aria-pressed={selected}
+                      >
+                        {tech.label}
+                        {!tech.impl && (
+                          <span className="text-[9px] bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded-full font-normal">
+                            soon
+                          </span>
+                        )}
+                        {blocked && <span className="text-[10px]">🔒</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {/* Retrieval: Top K */}
+                {section.id === 'ret' && (
+                  <div className="pt-1 border-t border-gray-50">
+                    <label htmlFor="top-k-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 mt-3">Top K</label>
+                    <input
+                      id="top-k-input"
+                      type="number" min="1" max="50"
+                      value={topK}
+                      onChange={e => setTopK(e.target.value)}
+                      className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">Number of chunks fed to the LLM as context per question.</p>
+                  </div>
+                )}
+
+                {/* Chunking: chunk size + overlap */}
+                {section.id === 'chunk' && (
+                  <div className="space-y-3 pt-1 border-t border-gray-50">
+                    <div className="mt-3">
+                      <label htmlFor="chunk-size-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Chunk size</label>
+                      <input
+                        id="chunk-size-input"
+                        type="number" min="50" max="8000"
+                        value={chunkSize}
+                        onChange={e => setChunkSize(e.target.value)}
+                        className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+                      />
+                      <p className="text-xs text-gray-400 mt-1">Size in tokens of each chunk when indexing documents.</p>
+                    </div>
+                    <div>
+                      <label htmlFor="chunk-overlap-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Chunk overlap</label>
+                      <input
+                        id="chunk-overlap-input"
+                        type="number" min="0" max="4000"
+                        value={chunkOverlap}
+                        onChange={e => setChunkOverlap(e.target.value)}
+                        className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+                      />
+                      <p className="text-xs text-gray-400 mt-1">Tokens shared between consecutive chunks to avoid cutting context at boundaries.</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Synthesis: temperature + XAI note */}
+                {section.id === 'syn' && (
+                  <div className="space-y-3 pt-1 border-t border-gray-50">
+                    <div className="mt-3">
+                      <label htmlFor="temperature-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Temperature</label>
+                      <input
+                        id="temperature-input"
+                        type="number" min="0" max="2" step="0.1"
+                        value={temperature}
+                        onChange={e => setTemperature(e.target.value)}
+                        className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+                      />
+                      <p className="text-xs text-gray-400 mt-1">Lower = more consistent, fact-focused. Higher = more varied, creative.</p>
+                    </div>
+                    <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-3">
+                      <p className="text-xs font-semibold text-blue-700 mb-0.5">XAI — Explainable RAG</p>
+                      <p className="text-xs text-blue-600 leading-relaxed">Adds citation tracking and hallucination detection per answer. Enable it per evaluation run in the Evaluation tab.</p>
+                    </div>
+                  </div>
+                )}
+
+              </div>
+            ))}
 
             <div className="flex items-center justify-end gap-3 pt-2">
               {advancedSaveMsg && <span className="text-sm text-gray-400">{advancedSaveMsg}</span>}
@@ -1026,6 +1169,7 @@ export default function AgentDetail() {
                 {savingAdvanced ? 'Saving...' : 'Save'}
               </button>
             </div>
+
           </div>
         )}
 
@@ -1224,6 +1368,53 @@ export default function AgentDetail() {
                                 )}
                                 <p>Time: {expandedRunDetail.results.global.time_seconds}s</p>
                               </div>
+
+                              {/* Score per question line chart */}
+                              {(() => {
+                                const data = expandedRunDetail.results.per_question
+                                const W = 500, H = 120, padL = 30, padR = 10, padT = 12, padB = 24
+                                const chartW = W - padL - padR
+                                const chartH = H - padT - padB
+                                const cx = i => padL + (chartW / (data.length - 1 || 1)) * i
+                                const cy = s => padT + chartH * (1 - s)
+                                const points = data.map((pq, i) => `${cx(i)},${cy(pq.score.mean)}`).join(' ')
+                                const ticks = [0, 0.5, 1]
+                                return (
+                                  <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 120 }}>
+                                    {ticks.map(t => {
+                                      const y = cy(t)
+                                      return (
+                                        <g key={t}>
+                                          <line x1={padL} y1={y} x2={W - padR} y2={y} stroke="#f3f4f6" strokeWidth="1" />
+                                          <text x={padL - 5} y={y + 3} fontSize="8" fill="#9ca3af" textAnchor="end">{t}</text>
+                                        </g>
+                                      )
+                                    })}
+                                    <polyline points={points} fill="none" stroke="#fb923c" strokeWidth="2" strokeLinejoin="round" />
+                                    {data.map((pq, i) => {
+                                      const score = pq.score.mean
+                                      const x = cx(i), y = cy(score)
+                                      const hovered = chartHoveredIdx === i
+                                      const tooltipY = Math.max(y - 18, padT)
+                                      const tooltipX = Math.min(Math.max(x - 14, padL), W - padR - 28)
+                                      return (
+                                        <g key={i} onMouseEnter={() => setChartHoveredIdx(i)} onMouseLeave={() => setChartHoveredIdx(null)} style={{ cursor: 'default' }}>
+                                          <circle cx={x} cy={y} r={hovered ? 5 : 4} fill="white" stroke={hovered ? '#f97316' : '#fb923c'} strokeWidth="2" />
+                                          <text x={x} y={H - 6} fontSize="8" fill="#9ca3af" textAnchor="middle">Q{i + 1}</text>
+                                          {hovered && (
+                                            <g>
+                                              <rect x={tooltipX} y={tooltipY} width={28} height={14} fill="#1f2937" rx="3" />
+                                              <text x={tooltipX + 14} y={tooltipY + 10} fontSize="9" fill="white" textAnchor="middle">{score.toFixed(2)}</text>
+                                            </g>
+                                          )}
+                                        </g>
+                                      )
+                                    })}
+                                    <line x1={padL} y1={padT} x2={padL} y2={padT + chartH} stroke="#e5e7eb" strokeWidth="1" />
+                                  </svg>
+                                )
+                              })()}
+
                               <div className="space-y-2">
                                 {expandedRunDetail.results.per_question.map((pq) => (
                                   <div key={pq.question} className="bg-white border border-gray-100 rounded-lg px-3 py-2">

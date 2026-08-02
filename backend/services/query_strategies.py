@@ -3,6 +3,10 @@ from abc import ABC, abstractmethod
 from llama_index.core import QueryBundle
 
 
+def _clean_answer(text) -> str:
+    return str(text).strip().replace('\n', ' ').replace(';', ',')
+
+
 def _generate_hypothetical(question: str, llm) -> str:
     return str(llm.complete(
         f"Write a short, factual answer to the following question based on your knowledge:"
@@ -29,7 +33,7 @@ class QueryStrategy(ABC):
         else:
             query = synthesis_question
         response = query_engine.query(query)
-        answer = str(response).strip().replace('\n', ' ').replace(';', ',')
+        answer = _clean_answer(response)
         return answer, response
 
 
@@ -65,7 +69,7 @@ class CRAGStrategy(QueryStrategy):
 
         chunks = "\n---\n".join(n.text for n in relevant)
         prompt = f"Context:\n{chunks}\n\nQuestion: {synthesis_question}\n\nAnswer:"
-        answer = str(llm.complete(prompt)).strip().replace('\n', ' ').replace(';', ',')
+        answer = _clean_answer(llm.complete(prompt))
         return answer, _CRAGResponse(relevant)
 
     def _grade(self, chunk: str, question: str, llm) -> str:

@@ -3,7 +3,7 @@ import chromadb
 from llama_index.core import VectorStoreIndex, Settings, SimpleDirectoryReader, StorageContext
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.vector_stores.chroma import ChromaVectorStore
-from services.query_strategies import get_query_strategy
+from services.query_strategies import get_query_strategy, _clean_answer
 
 _TRACE_SEP = "=" * 80
 
@@ -72,7 +72,7 @@ def _refine_answer(llm, question: str, source_texts: list) -> str:
         f"Answer the question using ONLY these fragments. "
         f"Cite each one like [Source: <verbatim text copied from context>]."
     )
-    return str(llm.complete(refine_prompt)).strip().replace('\n', ' ').replace(';', ',')
+    return _clean_answer(llm.complete(refine_prompt))
 
 
 def _xai_feedback_loop(rag_answer: str, source_texts: list, llm, question: str,
