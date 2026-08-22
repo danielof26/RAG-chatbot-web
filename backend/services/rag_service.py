@@ -113,14 +113,15 @@ def query_agent(agent_id: str, question: str, agent_config: dict) -> str:
         return "This agent has no knowledge documents yet. Upload a document first."
 
     rag_config = agent_config.get('rag_config', {})
-    top_k = rag_config.get('similarity_top_k', 5)
-    retrieval_mode = rag_config.get('retrieval_mode', 'naive')
+    top_k           = rag_config.get('similarity_top_k', 5)
+    retrieval_mode  = rag_config.get('retrieval_mode', 'naive')
+    synthesis_mode  = rag_config.get('synthesis_mode', 'compact')
 
     index = VectorStoreIndex.from_vector_store(
         vector_store,
         storage_context=storage_context
     )
-    query_engine = index.as_query_engine(similarity_top_k=top_k)
+    query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode)
     query = get_query_strategy(retrieval_mode).build_query(question, Settings.llm)
     response = query_engine.query(query)
     return str(response).strip()
@@ -140,14 +141,15 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict):
         return
 
     rag_config = agent_config.get('rag_config', {})
-    top_k = rag_config.get('similarity_top_k', 5)
-    retrieval_mode = rag_config.get('retrieval_mode', 'naive')
+    top_k           = rag_config.get('similarity_top_k', 5)
+    retrieval_mode  = rag_config.get('retrieval_mode', 'naive')
+    synthesis_mode  = rag_config.get('synthesis_mode', 'compact')
 
     index = VectorStoreIndex.from_vector_store(
         vector_store,
         storage_context=storage_context
     )
-    query_engine = index.as_query_engine(similarity_top_k=top_k, streaming=True)
+    query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode, streaming=True)
     query = get_query_strategy(retrieval_mode).build_query(question, Settings.llm)
     streaming_response = query_engine.query(query)
 

@@ -64,11 +64,11 @@ const RAG_SECTIONS = [
     title: 'Response synthesis',
     desc: 'How retrieved chunks are assembled into the final answer. Choose one — mutually exclusive.',
     techniques: [
-      { id: 'compact',    label: 'Compact (default)', impl: true,  desc: 'Packs chunks into the fewest possible LLM prompts before generating.',            incompat: ['refine','tree_sum','simple_sum','accumulate'] },
-      { id: 'refine',     label: 'Refine',            impl: false, desc: 'Iteratively refines the answer chunk by chunk.',                                  incompat: ['compact','tree_sum','simple_sum','accumulate'] },
-      { id: 'tree_sum',   label: 'Tree Summarize',    impl: false, desc: 'Builds a summary tree bottom-up — best for very long documents.',                 incompat: ['compact','refine','simple_sum','accumulate'] },
-      { id: 'simple_sum', label: 'Simple Summarize',  impl: false, desc: 'Truncates all chunks into a single prompt — fastest but may lose information.',  incompat: ['compact','refine','tree_sum','accumulate'] },
-      { id: 'accumulate', label: 'Accumulate',        impl: false, desc: 'Generates an answer per chunk independently, then combines them.',                incompat: ['compact','refine','tree_sum','simple_sum'] },
+      { id: 'compact',          label: 'Compact (default)', impl: true,  desc: 'Packs chunks into the fewest possible LLM prompts before generating.',           incompat: ['refine','tree_summarize','simple_summarize','accumulate'] },
+      { id: 'refine',           label: 'Refine',            impl: true, desc: 'Iteratively refines the answer chunk by chunk.',                                 incompat: ['compact','tree_summarize','simple_summarize','accumulate'] },
+      { id: 'tree_summarize',   label: 'Tree Summarize',    impl: true, desc: 'Builds a summary tree bottom-up — best for very long documents.',                incompat: ['compact','refine','simple_summarize','accumulate'] },
+      { id: 'simple_summarize', label: 'Simple Summarize',  impl: true, desc: 'Truncates all chunks into a single prompt — fastest but may lose information.', incompat: ['compact','refine','tree_summarize','accumulate'] },
+      { id: 'accumulate',       label: 'Accumulate',        impl: true, desc: 'Generates an answer per chunk independently, then combines them.',               incompat: ['compact','refine','tree_summarize','simple_summarize'] },
     ]
   },
   {
@@ -84,13 +84,13 @@ const RAG_SECTIONS = [
   },
 ]
 
-const DEFAULT_TECHS = new Set(['vector_index', 'vec_retriever', 'fixed_size', 'compact'])
+const DEFAULT_TECHS = new Set(['vector_index', 'vec_retriever', 'fixed_size'])
 
 const MODE_TECHS = {
-  naive:         ['naive'],
-  crag:          ['naive', 'crag'],
-  hyde_answer:   ['hyde_answer'],
-  hyde_combined: ['hyde_combined'],
+  naive:         ['naive',        'compact'],
+  crag:          ['naive', 'crag','compact'],
+  hyde_answer:   ['hyde_answer',  'compact'],
+  hyde_combined: ['hyde_combined','compact'],
 }
 
 const initTechsFromMode = (mode) => {
@@ -103,6 +103,11 @@ const MODE_PRIORITY = ['crag', 'hyde_combined', 'hyde_answer', 'naive']
 
 const computeRetrievalMode = (techs) =>
   MODE_PRIORITY.find(mode => techs.has(mode)) ?? 'naive'
+
+const SYNTHESIS_PRIORITY = ['refine', 'tree_summarize', 'simple_summarize', 'accumulate', 'compact']
+
+const computeSynthesisMode = (techs) =>
+  SYNTHESIS_PRIORITY.find(mode => techs.has(mode)) ?? 'compact'
 
 export default function AgentDetail() {
   const { id } = useParams()
@@ -253,7 +258,10 @@ export default function AgentDetail() {
     setChunkSize(data.rag_config?.chunk_size ?? 512)
     setChunkOverlap(data.rag_config?.chunk_overlap ?? 50)
     setTemperature(data.rag_config?.temperature ?? 0.1)
-    setSelectedTechs(initTechsFromMode(data.rag_config?.retrieval_mode ?? 'naive'))
+    const techs = initTechsFromMode(data.rag_config?.retrieval_mode ?? 'naive')
+    const synthMode = data.rag_config?.synthesis_mode ?? 'compact'
+    if (synthMode !== 'compact') { techs.delete('compact'); techs.add(synthMode) }
+    setSelectedTechs(techs)
     setLoading(false)
   }
 
@@ -414,7 +422,8 @@ export default function AgentDetail() {
           chunk_size: Number(chunkSize),
           chunk_overlap: Number(chunkOverlap),
           temperature: Number(temperature),
-          retrieval_mode: computeRetrievalMode(selectedTechs)
+          retrieval_mode: computeRetrievalMode(selectedTechs),
+          synthesis_mode: computeSynthesisMode(selectedTechs)
         }
       })
     })

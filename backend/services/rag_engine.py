@@ -9,7 +9,7 @@ _TRACE_SEP = "=" * 80
 
 
 def setup_rag(llm_provider, embed_provider, model_name, embed_model, file_paths, chroma_path, chroma_col,
-              prompt, chunk_size=1024, chunk_overlap=200, top_k=15, temperature=0.1):
+              prompt, chunk_size=1024, chunk_overlap=200, top_k=15, temperature=0.1, synthesis_mode='compact'):
     """Initialises the LLM, embedding model, ChromaDB vector store and LlamaIndex query engine."""
     llm = llm_provider.build_llm(model=model_name, system_prompt=prompt, temperature=temperature)
 
@@ -28,7 +28,7 @@ def setup_rag(llm_provider, embed_provider, model_name, embed_model, file_paths,
     else:
         index = VectorStoreIndex.from_vector_store(vector_store, storage_context=storage_context)
 
-    query_engine = index.as_query_engine(similarity_top_k=top_k)
+    query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode)
     return query_engine, llm
 
 
