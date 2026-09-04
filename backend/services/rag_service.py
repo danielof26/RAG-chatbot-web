@@ -1,5 +1,7 @@
 from llama_index.core import VectorStoreIndex, Settings, SimpleDirectoryReader, StorageContext
 from llama_index.core.node_parser import SentenceSplitter
+from llama_index.core.postprocessor import SimilarityPostprocessor
+from llama_index.core.postprocessor import SentenceTransformerRerank
 from llama_index.llms.ollama import Ollama
 import chromadb
 from llama_index.vector_stores.chroma import ChromaVectorStore
@@ -113,15 +115,20 @@ def query_agent(agent_id: str, question: str, agent_config: dict) -> str:
         return "This agent has no knowledge documents yet. Upload a document first."
 
     rag_config = agent_config.get('rag_config', {})
-    top_k           = rag_config.get('similarity_top_k', 5)
-    retrieval_mode  = rag_config.get('retrieval_mode', 'naive')
-    synthesis_mode  = rag_config.get('synthesis_mode', 'compact')
+    top_k              = rag_config.get('similarity_top_k', 5)
+    retrieval_mode     = rag_config.get('retrieval_mode', 'naive')
+    synthesis_mode     = rag_config.get('synthesis_mode', 'compact')
+    similarity_cutoff  = rag_config.get('similarity_cutoff') if rag_config.get('sim_filter') else None
+    rerank             = rag_config.get('rerank', False)
 
-    index = VectorStoreIndex.from_vector_store(
-        vector_store,
-        storage_context=storage_context
-    )
-    query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode)
+    index = VectorStoreIndex.from_vector_store(vector_store, storage_context=storage_context)
+    postprocessors = []
+    if similarity_cutoff:
+        postprocessors.append(SimilarityPostprocessor(similarity_cutoff=similarity_cutoff))
+    if rerank:
+        postprocessors.append(SentenceTransformerRerank(model='cross-encoder/ms-marco-MiniLM-L-6-v2', top_n=rag_config.get('rerank_top_n', 3)))
+    query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
+                                         node_postprocessors=postprocessors)
     query = get_query_strategy(retrieval_mode).build_query(question, Settings.llm)
     response = query_engine.query(query)
     return str(response).strip()
@@ -141,15 +148,20 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict):
         return
 
     rag_config = agent_config.get('rag_config', {})
-    top_k           = rag_config.get('similarity_top_k', 5)
-    retrieval_mode  = rag_config.get('retrieval_mode', 'naive')
-    synthesis_mode  = rag_config.get('synthesis_mode', 'compact')
+    top_k              = rag_config.get('similarity_top_k', 5)
+    retrieval_mode     = rag_config.get('retrieval_mode', 'naive')
+    synthesis_mode     = rag_config.get('synthesis_mode', 'compact')
+    similarity_cutoff  = rag_config.get('similarity_cutoff') if rag_config.get('sim_filter') else None
+    rerank             = rag_config.get('rerank', False)
 
-    index = VectorStoreIndex.from_vector_store(
-        vector_store,
-        storage_context=storage_context
-    )
-    query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode, streaming=True)
+    index = VectorStoreIndex.from_vector_store(vector_store, storage_context=storage_context)
+    postprocessors = []
+    if similarity_cutoff:
+        postprocessors.append(SimilarityPostprocessor(similarity_cutoff=similarity_cutoff))
+    if rerank:
+        postprocessors.append(SentenceTransformerRerank(model='cross-encoder/ms-marco-MiniLM-L-6-v2', top_n=rag_config.get('rerank_top_n', 3)))
+    query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
+                                         node_postprocessors=postprocessors, streaming=True)
     query = get_query_strategy(retrieval_mode).build_query(question, Settings.llm)
     streaming_response = query_engine.query(query)
 

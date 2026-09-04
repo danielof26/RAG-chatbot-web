@@ -2,6 +2,8 @@ import re
 import chromadb
 from llama_index.core import VectorStoreIndex, Settings, SimpleDirectoryReader, StorageContext
 from llama_index.core.node_parser import SentenceSplitter
+from llama_index.core.postprocessor import SimilarityPostprocessor
+from llama_index.core.postprocessor import SentenceTransformerRerank
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from services.query_strategies import get_query_strategy, _clean_answer
 
@@ -9,7 +11,8 @@ _TRACE_SEP = "=" * 80
 
 
 def setup_rag(llm_provider, embed_provider, model_name, embed_model, file_paths, chroma_path, chroma_col,
-              prompt, chunk_size=1024, chunk_overlap=200, top_k=15, temperature=0.1, synthesis_mode='compact'):
+              prompt, chunk_size=1024, chunk_overlap=200, top_k=15, temperature=0.1, synthesis_mode='compact',
+              similarity_cutoff=None, rerank=False, rerank_top_n=3):
     """Initialises the LLM, embedding model, ChromaDB vector store and LlamaIndex query engine."""
     llm = llm_provider.build_llm(model=model_name, system_prompt=prompt, temperature=temperature)
 
@@ -28,7 +31,13 @@ def setup_rag(llm_provider, embed_provider, model_name, embed_model, file_paths,
     else:
         index = VectorStoreIndex.from_vector_store(vector_store, storage_context=storage_context)
 
-    query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode)
+    postprocessors = []
+    if similarity_cutoff:
+        postprocessors.append(SimilarityPostprocessor(similarity_cutoff=similarity_cutoff))
+    if rerank:
+        postprocessors.append(SentenceTransformerRerank(model='cross-encoder/ms-marco-MiniLM-L-6-v2', top_n=rerank_top_n))
+    query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
+                                         node_postprocessors=postprocessors)
     return query_engine, llm
 
 

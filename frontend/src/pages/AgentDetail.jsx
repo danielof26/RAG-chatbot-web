@@ -51,9 +51,9 @@ const RAG_SECTIONS = [
     desc: 'Applied after retrieval to improve chunk quality. Most are combinable in pipeline — except the two reranking methods, choose one.',
     techniques: [
       { id: 'crag',         label: 'CRAG — Corrective RAG',    impl: true,  desc: 'LLM grades each chunk as relevant/ambiguous/irrelevant and filters the irrelevant ones.', incompat: ['rerank_ce','rerank_llm','hyde_answer','hyde_combined'] },
-      { id: 'rerank_ce',    label: 'Reranking (cross-encoder)', impl: false, desc: 'Reranks chunks using a sentence-transformer cross-encoder model.',       incompat: ['crag','rerank_llm'] },
+      { id: 'rerank_ce',    label: 'Reranking (cross-encoder)', impl: true, desc: 'Reranks chunks using a sentence-transformer cross-encoder model.',       incompat: ['crag','rerank_llm'] },
       { id: 'rerank_llm',   label: 'Reranking (LLM)',          impl: false, desc: 'Reranks chunks by asking the LLM to score each one for relevance.',     incompat: ['crag','rerank_ce'] },
-      { id: 'sim_filter',   label: 'SimilarityPostprocessor',  impl: false, desc: 'Discards chunks whose similarity score is below a set threshold.',       incompat: [] },
+      { id: 'sim_filter',   label: 'SimilarityPostprocessor',  impl: true,  desc: 'Discards chunks whose similarity score is below a set threshold.',       incompat: [] },
       { id: 'kw_filter',    label: 'KeywordNodePostprocessor', impl: false, desc: 'Filters chunks that do not contain required keywords.',                  incompat: [] },
       { id: 'prev_next',    label: 'PrevNextNodePostprocessor',impl: false, desc: 'Expands each retrieved chunk with its neighbouring chunks for context.', incompat: [] },
       { id: 'long_reorder', label: 'LongContextReorder',       impl: false, desc: 'Reorders chunks to place the most relevant at start and end of prompt.',incompat: [] },
@@ -153,6 +153,8 @@ export default function AgentDetail() {
   const [chunkSize, setChunkSize] = useState(512)
   const [chunkOverlap, setChunkOverlap] = useState(50)
   const [temperature, setTemperature] = useState(0.1)
+  const [similarityCutoff, setSimilarityCutoff] = useState(0.7)
+  const [rerankTopN, setRerankTopN] = useState(3)
   const [selectedTechs, setSelectedTechs] = useState(() => initTechsFromMode('naive'))
   const [savingAdvanced, setSavingAdvanced] = useState(false)
   const [advancedSaveMsg, setAdvancedSaveMsg] = useState('')
@@ -258,9 +260,13 @@ export default function AgentDetail() {
     setChunkSize(data.rag_config?.chunk_size ?? 512)
     setChunkOverlap(data.rag_config?.chunk_overlap ?? 50)
     setTemperature(data.rag_config?.temperature ?? 0.1)
+    setSimilarityCutoff(data.rag_config?.similarity_cutoff ?? 0.7)
+    setRerankTopN(data.rag_config?.rerank_top_n ?? 3)
     const techs = initTechsFromMode(data.rag_config?.retrieval_mode ?? 'naive')
     const synthMode = data.rag_config?.synthesis_mode ?? 'compact'
     if (synthMode !== 'compact') { techs.delete('compact'); techs.add(synthMode) }
+    if (data.rag_config?.sim_filter) techs.add('sim_filter')
+    if (data.rag_config?.rerank)     techs.add('rerank_ce')
     setSelectedTechs(techs)
     setLoading(false)
   }
@@ -423,7 +429,11 @@ export default function AgentDetail() {
           chunk_overlap: Number(chunkOverlap),
           temperature: Number(temperature),
           retrieval_mode: computeRetrievalMode(selectedTechs),
-          synthesis_mode: computeSynthesisMode(selectedTechs)
+          synthesis_mode: computeSynthesisMode(selectedTechs),
+          sim_filter: selectedTechs.has('sim_filter'),
+          similarity_cutoff: Number(similarityCutoff),
+          rerank: selectedTechs.has('rerank_ce'),
+          rerank_top_n: Number(rerankTopN)
         }
       })
     })
@@ -1113,6 +1123,36 @@ export default function AgentDetail() {
                       className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
                     />
                     <p className="text-xs text-gray-400 mt-1">Number of chunks fed to the LLM as context per question.</p>
+                  </div>
+                )}
+
+                {/* Post-retrieval: rerank top_n (only when rerank_ce active) */}
+                {section.id === 'post' && selectedTechs.has('rerank_ce') && (
+                  <div className="pt-1 border-t border-gray-50">
+                    <label htmlFor="rerank-top-n-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 mt-3">Reranker top N</label>
+                    <input
+                      id="rerank-top-n-input"
+                      type="number" min="1" max="20"
+                      value={rerankTopN}
+                      onChange={e => setRerankTopN(e.target.value)}
+                      className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">Number of chunks the reranker keeps after scoring. Higher = more context, lower = more precision.</p>
+                  </div>
+                )}
+
+                {/* Post-retrieval: similarity cutoff (only when sim_filter active) */}
+                {section.id === 'post' && selectedTechs.has('sim_filter') && (
+                  <div className="pt-1 border-t border-gray-50">
+                    <label htmlFor="sim-cutoff-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 mt-3">Similarity threshold</label>
+                    <input
+                      id="sim-cutoff-input"
+                      type="number" min="0" max="1" step="0.05"
+                      value={similarityCutoff}
+                      onChange={e => setSimilarityCutoff(e.target.value)}
+                      className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">Chunks with a similarity score below this value are discarded. Between 0 and 1 — try 0.7.</p>
                   </div>
                 )}
 
