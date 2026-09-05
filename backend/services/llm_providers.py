@@ -141,6 +141,7 @@ class OpenAILikeProvider(LLMProvider):
             system_prompt=system_prompt or None,
             is_chat_model=True,
             context_window=8000,
+            timeout=600,
         )
 
     def get_models(self) -> list:
