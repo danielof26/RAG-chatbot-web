@@ -98,32 +98,54 @@ class SelfRAGStrategy(QueryStrategy):
         response = query_engine.query(synthesis_question)
         answer = _clean_answer(response)
 
-        if llm and self._evaluate(question, response.source_nodes, answer, llm) == 'FAIL':
-            chunks = "\n---\n".join(n.text for n in response.source_nodes)
-            prompt = (
-                f"The following context fragments are all the information available:\n\n"
-                f"{chunks}\n\n"
-                f"Question: {question}\n\n"
-                f"Answer the question as completely as possible using only the fragments above."
-            )
-            answer = _clean_answer(llm.complete(prompt))
+        if llm:
+            evaluation = self._evaluate(question, response.source_nodes, answer, llm)
+            if not evaluation['supported']:
+                chunks = "\n---\n".join(n.text for n in response.source_nodes)
+                critique = ""
+                if evaluation['issues']:
+                    critique += "Issues to fix:\n" + "\n".join(f"- {i}" for i in evaluation['issues']) + "\n"
+                if evaluation['missing_info']:
+                    critique += f"Missing information: {evaluation['missing_info']}\n"
+                prompt = (
+                    f"The previous answer had the following problems:\n{critique}\n"
+                    f"Context fragments (use ONLY these):\n{chunks}\n\n"
+                    f"Question: {question}\n\n"
+                    f"Rewrite the answer fixing the problems above using only the fragments provided."
+                )
+                answer = _clean_answer(llm.complete(prompt))
 
         return answer, response
 
-    def _evaluate(self, question: str, nodes: list, answer: str, llm) -> str:
+    def _evaluate(self, question: str, nodes: list, answer: str, llm) -> dict:
+        import json, re
         chunks = "\n---\n".join(n.text[:200] for n in nodes)
         prompt = (
             f"Question: {question}\n\n"
             f"Retrieved context:\n{chunks}\n\n"
             f"Answer: {answer}\n\n"
-            f"Is this answer relevant to the question and grounded in the context?\n"
-            f"Reply with exactly one word: PASS or FAIL."
+            f"Evaluate this answer. Reply with ONLY a JSON object with these fields:\n"
+            f"- supported (bool): true if the answer is grounded in the context and relevant\n"
+            f"- missing_info (str): what important information is missing or wrong, empty string if none\n"
+            f"- issues (list of str): specific problems found, empty list if none\n\n"
+            f"Reply with ONLY the JSON object, no other text."
         )
-        result = str(llm.complete(prompt)).strip().upper()
-        verdict = 'FAIL' if 'FAIL' in result else 'PASS'
-        if _SELF_RAG_DEBUG:
-            print(f"[Self-RAG] Evaluation: {verdict} (raw: {result[:50]})")
-        return verdict
+        raw = str(llm.complete(prompt)).strip()
+        try:
+            match = re.search(r'\{.*\}', raw, re.DOTALL)
+            result = json.loads(match.group() if match else raw)
+            supported = bool(result.get('supported', True))
+            missing_info = str(result.get('missing_info', ''))
+            issues = [str(i) for i in result.get('issues', [])]
+            verdict = 'PASS' if supported else 'FAIL'
+            if _SELF_RAG_DEBUG:
+                print(f"[Self-RAG] Evaluation: {verdict} | issues: {issues} | missing: {missing_info}")
+            return {'supported': supported, 'missing_info': missing_info, 'issues': issues}
+        except Exception:
+            verdict = 'FAIL' if ('FALSE' in raw.upper() or 'FAIL' in raw.upper()) else 'PASS'
+            if _SELF_RAG_DEBUG:
+                print(f"[Self-RAG] Evaluation (fallback): {verdict} (raw: {raw[:80]})")
+            return {'supported': verdict == 'PASS', 'missing_info': '', 'issues': []}
 
 
 _STRATEGIES = {
