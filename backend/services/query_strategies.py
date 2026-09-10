@@ -2,6 +2,8 @@ from abc import ABC, abstractmethod
 
 from llama_index.core import QueryBundle
 
+_SELF_RAG_DEBUG = True  # set to False to disable Self-RAG evaluation logging
+
 
 def _clean_answer(text) -> str:
     return str(text).strip().replace('\n', ' ').replace(';', ',')
@@ -86,11 +88,50 @@ class CRAGStrategy(QueryStrategy):
         return 'AMBIGUOUS'
 
 
+class SelfRAGStrategy(QueryStrategy):
+    def build_query(self, question: str, llm) -> str:
+        return question  # unused — execute() is fully overridden
+
+    def execute(self, query_engine, question: str, llm, synthesis_question: str = None) -> tuple:
+        synthesis_question = synthesis_question or question
+
+        response = query_engine.query(synthesis_question)
+        answer = _clean_answer(response)
+
+        if llm and self._evaluate(question, response.source_nodes, answer, llm) == 'FAIL':
+            chunks = "\n---\n".join(n.text for n in response.source_nodes)
+            prompt = (
+                f"The following context fragments are all the information available:\n\n"
+                f"{chunks}\n\n"
+                f"Question: {question}\n\n"
+                f"Answer the question as completely as possible using only the fragments above."
+            )
+            answer = _clean_answer(llm.complete(prompt))
+
+        return answer, response
+
+    def _evaluate(self, question: str, nodes: list, answer: str, llm) -> str:
+        chunks = "\n---\n".join(n.text[:200] for n in nodes)
+        prompt = (
+            f"Question: {question}\n\n"
+            f"Retrieved context:\n{chunks}\n\n"
+            f"Answer: {answer}\n\n"
+            f"Is this answer relevant to the question and grounded in the context?\n"
+            f"Reply with exactly one word: PASS or FAIL."
+        )
+        result = str(llm.complete(prompt)).strip().upper()
+        verdict = 'FAIL' if 'FAIL' in result else 'PASS'
+        if _SELF_RAG_DEBUG:
+            print(f"[Self-RAG] Evaluation: {verdict} (raw: {result[:50]})")
+        return verdict
+
+
 _STRATEGIES = {
     'naive':         NaiveStrategy,
     'hyde_answer':   HyDEAnswerStrategy,
     'hyde_combined': HyDECombinedStrategy,
     'crag':          CRAGStrategy,
+    'self_rag':      SelfRAGStrategy,
 }
 
 

@@ -129,9 +129,9 @@ def query_agent(agent_id: str, question: str, agent_config: dict) -> str:
         postprocessors.append(SentenceTransformerRerank(model='cross-encoder/ms-marco-MiniLM-L-6-v2', top_n=rag_config.get('rerank_top_n', 3)))
     query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
                                          node_postprocessors=postprocessors)
-    query = get_query_strategy(retrieval_mode).build_query(question, Settings.llm)
-    response = query_engine.query(query)
-    return str(response).strip()
+    strategy = get_query_strategy(retrieval_mode)
+    answer, _ = strategy.execute(query_engine, question, Settings.llm)
+    return answer
 
 
 def stream_query_agent(agent_id: str, question: str, agent_config: dict):
@@ -162,11 +162,16 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict):
         postprocessors.append(SentenceTransformerRerank(model='cross-encoder/ms-marco-MiniLM-L-6-v2', top_n=rag_config.get('rerank_top_n', 3)))
     query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
                                          node_postprocessors=postprocessors, streaming=True)
-    query = get_query_strategy(retrieval_mode).build_query(question, Settings.llm)
-    streaming_response = query_engine.query(query)
-
-    for token in streaming_response.response_gen:
-        yield token
+    strategy = get_query_strategy(retrieval_mode)
+    if retrieval_mode == 'self_rag':
+        answer, _ = strategy.execute(query_engine, question, Settings.llm)
+        for word in answer.split(' '):
+            yield word + ' '
+    else:
+        query = strategy.build_query(question, Settings.llm)
+        streaming_response = query_engine.query(query)
+        for token in streaming_response.response_gen:
+            yield token
 
 
 def delete_document_vectors(agent_id: str, file_path: str):

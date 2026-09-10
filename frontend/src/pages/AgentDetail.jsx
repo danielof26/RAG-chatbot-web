@@ -51,6 +51,7 @@ const RAG_SECTIONS = [
     desc: 'Applied after retrieval to improve chunk quality. Most are combinable in pipeline — except the two reranking methods, choose one.',
     techniques: [
       { id: 'crag',         label: 'CRAG — Corrective RAG',    impl: true,  desc: 'LLM grades each chunk as relevant/ambiguous/irrelevant and filters the irrelevant ones.', incompat: ['rerank_ce','rerank_llm','hyde_answer','hyde_combined'] },
+      { id: 'self_rag',    label: 'Self-RAG',                 impl: true,  desc: 'After generating, the LLM evaluates its own answer (PASS/FAIL). If FAIL, retries with chunks embedded directly in the prompt.', incompat: [] },
       { id: 'rerank_ce',    label: 'Reranking (cross-encoder)', impl: true, desc: 'Reranks chunks using a sentence-transformer cross-encoder model.',       incompat: ['crag','rerank_llm'] },
       { id: 'rerank_llm',   label: 'Reranking (LLM)',          impl: false, desc: 'Reranks chunks by asking the LLM to score each one for relevance.',     incompat: ['crag','rerank_ce'] },
       { id: 'sim_filter',   label: 'SimilarityPostprocessor',  impl: true,  desc: 'Discards chunks whose similarity score is below a set threshold.',       incompat: [] },
@@ -87,10 +88,11 @@ const RAG_SECTIONS = [
 const DEFAULT_TECHS = new Set(['vector_index', 'vec_retriever', 'fixed_size'])
 
 const MODE_TECHS = {
-  naive:         ['naive',        'compact'],
-  crag:          ['naive', 'crag','compact'],
-  hyde_answer:   ['hyde_answer',  'compact'],
-  hyde_combined: ['hyde_combined','compact'],
+  naive:         ['naive',           'compact'],
+  crag:          ['naive', 'crag',   'compact'],
+  hyde_answer:   ['hyde_answer',     'compact'],
+  hyde_combined: ['hyde_combined',   'compact'],
+  self_rag:      ['naive', 'self_rag','compact'],
 }
 
 const initTechsFromMode = (mode) => {
@@ -99,7 +101,7 @@ const initTechsFromMode = (mode) => {
   return t
 }
 
-const MODE_PRIORITY = ['crag', 'hyde_combined', 'hyde_answer', 'naive']
+const MODE_PRIORITY = ['crag', 'self_rag', 'hyde_combined', 'hyde_answer', 'naive']
 
 const computeRetrievalMode = (techs) =>
   MODE_PRIORITY.find(mode => techs.has(mode)) ?? 'naive'
