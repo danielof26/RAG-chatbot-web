@@ -154,6 +154,7 @@ _STRATEGIES = {
     'hyde_combined': HyDECombinedStrategy,
     'crag':          CRAGStrategy,
     'self_rag':      SelfRAGStrategy,
+    'router':        NaiveStrategy,
 }
 
 

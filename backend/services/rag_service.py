@@ -102,6 +102,65 @@ def index_document(agent_id: str, file_path: str, embed_model: str = None, embed
     )
 
 
+def _build_router_engine(index, llm, top_k: int):
+    from llama_index.core.query_engine import RouterQueryEngine, SubQuestionQueryEngine, CustomQueryEngine
+    from llama_index.core.selectors import LLMSingleSelector
+    from llama_index.core.tools import QueryEngineTool
+
+    engine_simple = index.as_query_engine(similarity_top_k=top_k, response_mode='compact')
+
+    from llama_index.core.question_gen import LLMQuestionGenerator
+    engine_multihop = SubQuestionQueryEngine.from_defaults(
+        query_engine_tools=[
+            QueryEngineTool.from_defaults(
+                query_engine=engine_simple,
+                description="Useful for answering questions about the documents"
+            )
+        ],
+        question_gen=LLMQuestionGenerator.from_defaults(),
+        use_async=False
+    )
+
+    engine_summary = index.as_query_engine(similarity_top_k=top_k * 3, response_mode='tree_summarize')
+
+    class _OODEngine(CustomQueryEngine):
+        def custom_query(self, query_str: str):
+            return "No tengo información sobre ese tema en los documentos disponibles."
+
+    tools = [
+        QueryEngineTool.from_defaults(
+            query_engine=engine_simple,
+            description=(
+                "Use for simple factual questions about a specific person, event, date, or number. "
+                "Examples: '¿Quién es X?', '¿Cuándo ocurrió Y?', '¿Cuántos Z tiene?'"
+            )
+        ),
+        QueryEngineTool.from_defaults(
+            query_engine=engine_multihop,
+            description=(
+                "Use for complex questions requiring reasoning across multiple sources or in steps. "
+                "Examples: '¿Cómo influyó X en Y?', '¿Qué relación hay entre A y B?'"
+            )
+        ),
+        QueryEngineTool.from_defaults(
+            query_engine=engine_summary,
+            description=(
+                "Use for broad questions asking for an overview or summary of a topic. "
+                "Examples: 'Resume el documento', '¿De qué tratan los documentos?'"
+            )
+        ),
+        QueryEngineTool.from_defaults(
+            query_engine=_OODEngine(),
+            description=(
+                "Use ONLY when the question is clearly unrelated to the uploaded documents "
+                "and cannot be answered from the available context."
+            )
+        ),
+    ]
+
+    return RouterQueryEngine(selector=LLMSingleSelector.from_defaults(), query_engine_tools=tools, verbose=True)
+
+
 def query_agent(agent_id: str, question: str, agent_config: dict) -> str:
     """
     Hace una pregunta al RAG del agente y devuelve la respuesta.
@@ -127,8 +186,11 @@ def query_agent(agent_id: str, question: str, agent_config: dict) -> str:
         postprocessors.append(SimilarityPostprocessor(similarity_cutoff=similarity_cutoff))
     if rerank:
         postprocessors.append(SentenceTransformerRerank(model='cross-encoder/ms-marco-MiniLM-L-6-v2', top_n=rag_config.get('rerank_top_n', 3)))
-    query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
-                                         node_postprocessors=postprocessors)
+    if retrieval_mode == 'router':
+        query_engine = _build_router_engine(index, Settings.llm, top_k)
+    else:
+        query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
+                                             node_postprocessors=postprocessors)
     strategy = get_query_strategy(retrieval_mode)
     answer, _ = strategy.execute(query_engine, question, Settings.llm)
     return answer
@@ -160,10 +222,13 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict):
         postprocessors.append(SimilarityPostprocessor(similarity_cutoff=similarity_cutoff))
     if rerank:
         postprocessors.append(SentenceTransformerRerank(model='cross-encoder/ms-marco-MiniLM-L-6-v2', top_n=rag_config.get('rerank_top_n', 3)))
-    query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
-                                         node_postprocessors=postprocessors, streaming=True)
+    if retrieval_mode == 'router':
+        query_engine = _build_router_engine(index, Settings.llm, top_k)
+    else:
+        query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
+                                             node_postprocessors=postprocessors, streaming=True)
     strategy = get_query_strategy(retrieval_mode)
-    if retrieval_mode == 'self_rag':
+    if retrieval_mode in ('self_rag', 'router'):
         answer, _ = strategy.execute(query_engine, question, Settings.llm)
         for word in answer.split(' '):
             yield word + ' '

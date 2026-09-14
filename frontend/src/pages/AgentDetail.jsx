@@ -17,7 +17,7 @@ const RAG_SECTIONS = [
       { id: 'multi_query',   label: 'Multi-Query',          impl: false, desc: 'Generates N reformulations of the question and fuses all results to improve recall.',     incompat: [] },
       { id: 'step_back',     label: 'Step-back Prompting',  impl: false, desc: 'Abstracts the question to a higher-level concept before retrieving.',                     incompat: [] },
       { id: 'sub_question',  label: 'Sub-question Engine',  impl: false, desc: 'Decomposes complex questions into sub-questions, each with its own retrieval.',           incompat: [] },
-      { id: 'router',        label: 'Router Query Engine',  impl: false, desc: 'Routes the query to the most suitable index or tool (exclusive index selection).',        incompat: [] },
+      { id: 'router',        label: 'Router Adaptativo',    impl: true,  desc: 'Classifies the query type (factual, multi-hop, summary, out-of-domain) and routes it to the most suitable engine automatically.',        incompat: ['hyde_answer', 'hyde_combined', 'crag', 'self_rag'] },
     ]
   },
   {
@@ -88,11 +88,12 @@ const RAG_SECTIONS = [
 const DEFAULT_TECHS = new Set(['vector_index', 'vec_retriever', 'fixed_size'])
 
 const MODE_TECHS = {
-  naive:         ['naive',           'compact'],
-  crag:          ['naive', 'crag',   'compact'],
-  hyde_answer:   ['hyde_answer',     'compact'],
-  hyde_combined: ['hyde_combined',   'compact'],
-  self_rag:      ['naive', 'self_rag','compact'],
+  naive:         ['naive',             'compact'],
+  crag:          ['naive', 'crag',     'compact'],
+  hyde_answer:   ['hyde_answer',       'compact'],
+  hyde_combined: ['hyde_combined',     'compact'],
+  self_rag:      ['naive', 'self_rag', 'compact'],
+  router:        ['router',            'compact'],
 }
 
 const initTechsFromMode = (mode) => {
@@ -101,7 +102,7 @@ const initTechsFromMode = (mode) => {
   return t
 }
 
-const MODE_PRIORITY = ['crag', 'self_rag', 'hyde_combined', 'hyde_answer', 'naive']
+const MODE_PRIORITY = ['crag', 'self_rag', 'router', 'hyde_combined', 'hyde_answer', 'naive']
 
 const computeRetrievalMode = (techs) =>
   MODE_PRIORITY.find(mode => techs.has(mode)) ?? 'naive'
