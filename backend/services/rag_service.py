@@ -161,6 +161,32 @@ def _build_router_engine(index, llm, top_k: int):
     return RouterQueryEngine(selector=LLMSingleSelector.from_defaults(), query_engine_tools=tools, verbose=True)
 
 
+def _build_fusion_engine(index, chroma_collection, top_k: int, top_q: int):
+    from llama_index.core.retrievers import QueryFusionRetriever
+    from llama_index.retrievers.bm25 import BM25Retriever
+    from llama_index.core.schema import TextNode
+    from llama_index.core.query_engine import RetrieverQueryEngine
+
+    vector_retriever = index.as_retriever(similarity_top_k=top_k)
+
+    raw = chroma_collection.get(include=['documents', 'metadatas'])
+    nodes = [
+        TextNode(text=doc, metadata=meta or {})
+        for doc, meta in zip(raw['documents'], raw['metadatas'])
+    ]
+    bm25_retriever = BM25Retriever.from_defaults(nodes=nodes, similarity_top_k=top_k)
+
+    fusion_retriever = QueryFusionRetriever(
+        [vector_retriever, bm25_retriever],
+        similarity_top_k=top_k,
+        num_queries=top_q,
+        mode="reciprocal_rerank",
+        use_async=False,
+        verbose=True,
+    )
+    return RetrieverQueryEngine.from_args(fusion_retriever)
+
+
 def query_agent(agent_id: str, question: str, agent_config: dict) -> str:
     """
     Hace una pregunta al RAG del agente y devuelve la respuesta.
@@ -175,6 +201,7 @@ def query_agent(agent_id: str, question: str, agent_config: dict) -> str:
 
     rag_config = agent_config.get('rag_config', {})
     top_k              = rag_config.get('similarity_top_k', 5)
+    top_q              = rag_config.get('fusion_num_queries', 1)
     retrieval_mode     = rag_config.get('retrieval_mode', 'naive')
     synthesis_mode     = rag_config.get('synthesis_mode', 'compact')
     similarity_cutoff  = rag_config.get('similarity_cutoff') if rag_config.get('sim_filter') else None
@@ -188,6 +215,8 @@ def query_agent(agent_id: str, question: str, agent_config: dict) -> str:
         postprocessors.append(SentenceTransformerRerank(model='cross-encoder/ms-marco-MiniLM-L-6-v2', top_n=rag_config.get('rerank_top_n', 3)))
     if retrieval_mode == 'router':
         query_engine = _build_router_engine(index, Settings.llm, top_k)
+    elif retrieval_mode == 'fusion':
+        query_engine = _build_fusion_engine(index, chroma_collection, top_k, top_q)
     else:
         query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
                                              node_postprocessors=postprocessors)
@@ -211,6 +240,7 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict):
 
     rag_config = agent_config.get('rag_config', {})
     top_k              = rag_config.get('similarity_top_k', 5)
+    top_q              = rag_config.get('fusion_num_queries', 1)
     retrieval_mode     = rag_config.get('retrieval_mode', 'naive')
     synthesis_mode     = rag_config.get('synthesis_mode', 'compact')
     similarity_cutoff  = rag_config.get('similarity_cutoff') if rag_config.get('sim_filter') else None
@@ -224,11 +254,13 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict):
         postprocessors.append(SentenceTransformerRerank(model='cross-encoder/ms-marco-MiniLM-L-6-v2', top_n=rag_config.get('rerank_top_n', 3)))
     if retrieval_mode == 'router':
         query_engine = _build_router_engine(index, Settings.llm, top_k)
+    elif retrieval_mode == 'fusion':
+        query_engine = _build_fusion_engine(index, chroma_collection, top_k, top_q)
     else:
         query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
                                              node_postprocessors=postprocessors, streaming=True)
     strategy = get_query_strategy(retrieval_mode)
-    if retrieval_mode in ('self_rag', 'router'):
+    if retrieval_mode in ('self_rag', 'router', 'fusion'):
         answer, _ = strategy.execute(query_engine, question, Settings.llm)
         for word in answer.split(' '):
             yield word + ' '

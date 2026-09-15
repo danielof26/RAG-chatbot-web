@@ -155,6 +155,7 @@ _STRATEGIES = {
     'crag':          CRAGStrategy,
     'self_rag':      SelfRAGStrategy,
     'router':        NaiveStrategy,
+    'fusion':        NaiveStrategy,
 }
 
 

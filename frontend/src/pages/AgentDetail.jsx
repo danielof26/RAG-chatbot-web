@@ -41,7 +41,7 @@ const RAG_SECTIONS = [
       { id: 'bm25',           label: 'BM25 (sparse/keyword)',   impl: false, desc: 'Classic keyword retrieval — complements dense search for exact terms.',    incompat: [] },
       { id: 'auto_merging',   label: 'Auto-Merging',            impl: false, desc: 'Merges child chunks into parent when enough siblings are retrieved.',      incompat: [] },
       { id: 'recursive',      label: 'Recursive Retriever',     impl: false, desc: 'Follows references between nodes recursively to complete context.',       incompat: [] },
-      { id: 'fusion',         label: 'Fusion (dense + sparse)', impl: false, desc: 'Combines vector and BM25 retrievers with reciprocal rank fusion.',        incompat: [] },
+      { id: 'fusion',         label: 'Fusion (dense + sparse)', impl: true,  desc: 'Combines vector and BM25 retrievers with reciprocal rank fusion for hybrid retrieval.',  incompat: ['hyde_answer', 'hyde_combined', 'crag', 'self_rag', 'router'] },
       { id: 'auto_retrieval', label: 'Auto-Retrieval',          impl: false, desc: 'Extracts metadata filters from the query to narrow the search space.',   incompat: [] },
     ]
   },
@@ -94,6 +94,7 @@ const MODE_TECHS = {
   hyde_combined: ['hyde_combined',     'compact'],
   self_rag:      ['naive', 'self_rag', 'compact'],
   router:        ['router',            'compact'],
+  fusion:        ['fusion',            'compact'],
 }
 
 const initTechsFromMode = (mode) => {
@@ -102,7 +103,7 @@ const initTechsFromMode = (mode) => {
   return t
 }
 
-const MODE_PRIORITY = ['crag', 'self_rag', 'router', 'hyde_combined', 'hyde_answer', 'naive']
+const MODE_PRIORITY = ['crag', 'self_rag', 'router', 'fusion', 'hyde_combined', 'hyde_answer', 'naive']
 
 const computeRetrievalMode = (techs) =>
   MODE_PRIORITY.find(mode => techs.has(mode)) ?? 'naive'
@@ -158,6 +159,7 @@ export default function AgentDetail() {
   const [temperature, setTemperature] = useState(0.1)
   const [similarityCutoff, setSimilarityCutoff] = useState(0.7)
   const [rerankTopN, setRerankTopN] = useState(3)
+  const [fusionNumQueries, setFusionNumQueries] = useState(1)
   const [selectedTechs, setSelectedTechs] = useState(() => initTechsFromMode('naive'))
   const [savingAdvanced, setSavingAdvanced] = useState(false)
   const [advancedSaveMsg, setAdvancedSaveMsg] = useState('')
@@ -265,6 +267,7 @@ export default function AgentDetail() {
     setTemperature(data.rag_config?.temperature ?? 0.1)
     setSimilarityCutoff(data.rag_config?.similarity_cutoff ?? 0.7)
     setRerankTopN(data.rag_config?.rerank_top_n ?? 3)
+    setFusionNumQueries(data.rag_config?.fusion_num_queries ?? 1)
     const techs = initTechsFromMode(data.rag_config?.retrieval_mode ?? 'naive')
     const synthMode = data.rag_config?.synthesis_mode ?? 'compact'
     if (synthMode !== 'compact') { techs.delete('compact'); techs.add(synthMode) }
@@ -436,7 +439,8 @@ export default function AgentDetail() {
           sim_filter: selectedTechs.has('sim_filter'),
           similarity_cutoff: Number(similarityCutoff),
           rerank: selectedTechs.has('rerank_ce'),
-          rerank_top_n: Number(rerankTopN)
+          rerank_top_n: Number(rerankTopN),
+          fusion_num_queries: Number(fusionNumQueries)
         }
       })
     })
@@ -1126,6 +1130,21 @@ export default function AgentDetail() {
                       className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
                     />
                     <p className="text-xs text-gray-400 mt-1">Number of chunks fed to the LLM as context per question.</p>
+                  </div>
+                )}
+
+                {/* Retrieval: fusion top_q (only when fusion active) */}
+                {section.id === 'ret' && selectedTechs.has('fusion') && (
+                  <div className="pt-1 border-t border-gray-50">
+                    <label htmlFor="fusion-num-queries-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 mt-3">Query Variants (top_q)</label>
+                    <input
+                      id="fusion-num-queries-input"
+                      type="number" min="1" max="8"
+                      value={fusionNumQueries}
+                      onChange={e => setFusionNumQueries(e.target.value)}
+                      className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">Number of query variants the LLM generates before fusing results. 1 = no variants (faster), 4 = richer recall.</p>
                   </div>
                 )}
 
