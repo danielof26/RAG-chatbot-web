@@ -71,6 +71,7 @@ llama-index-llms-gemini
 llama-index-llms-ollama==0.10.1
 llama-index-llms-openai==0.7.8
 llama-index-llms-openai-like==0.7.2
+llama-index-retrievers-bm25==0.5.2
 llama-index-vector-stores-chroma==0.5.5
 llama-index-workflows==2.20.0
 markdown-it-py==4.2.0
