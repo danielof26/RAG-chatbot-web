@@ -24,6 +24,7 @@ _stemmers = {
     'es': SnowballStemmer('spanish'),
     'en': SnowballStemmer('english'),
 }
+_bert_scorers = {}
 
 
 def _get_nlp(language: str):
@@ -57,6 +58,18 @@ def compute_rouge(generated: str, reference: str) -> dict:
         'rouge2': round(scores['rouge2'].fmeasure, 4),
         'rougeL': round(scores['rougeL'].fmeasure, 4),
     }
+
+
+def compute_bertscore(generated: str, reference: str, lang: str = 'es') -> float | None:
+    """Computes BERTScore F1 between a generated and a reference answer using contextual embeddings."""
+    try:
+        if lang not in _bert_scorers:
+            from bert_score import BERTScorer
+            _bert_scorers[lang] = BERTScorer(lang=lang, rescale_with_baseline=False)
+        _, _, F1 = _bert_scorers[lang].score([generated], [reference])
+        return round(float(F1[0]), 4)
+    except Exception:
+        return None
 
 
 def parse_questions_csv(file_bytes: bytes) -> list:
@@ -139,12 +152,13 @@ def _build_query_engine(run_id: str, agent: dict, snapshot: dict, file_paths: li
     )
 
 
-def _build_per_question_results(questions, scores, hallucinations_all, rouge_scores, last_answers):
+def _build_per_question_results(questions, scores, hallucinations_all, rouge_scores, bert_scores, last_answers):
     per_question = []
     for i, q in enumerate(questions):
         valid_h = [h for h in hallucinations_all[i] if h >= 0]
         rg_i = rouge_scores[i]
         has_rouge = len(rg_i['rouge1']) > 0
+        bs_i = [b for b in bert_scores[i] if b is not None]
         per_question.append({
             'question': q['question'],
             'keywords': q['keywords'],
@@ -154,11 +168,12 @@ def _build_per_question_results(questions, scores, hallucinations_all, rouge_sco
             'rouge1_mean': round(sum(rg_i['rouge1']) / len(rg_i['rouge1']), 4) if has_rouge else None,
             'rouge2_mean': round(sum(rg_i['rouge2']) / len(rg_i['rouge2']), 4) if has_rouge else None,
             'rougeL_mean': round(sum(rg_i['rougeL']) / len(rg_i['rougeL']), 4) if has_rouge else None,
+            'bertscore_mean': round(sum(bs_i) / len(bs_i), 4) if bs_i else None,
         })
     return per_question
 
 
-def _execute_questions(run_id: str, query_engine, llm, run: dict, nlp, retrieval_mode: str = 'naive'):
+def _execute_questions(run_id: str, query_engine, llm, run: dict, nlp, retrieval_mode: str = 'naive', lang: str = 'es'):
     questions = run['dataset']
     architecture = 'xai' if run['xai'] else 'naive'
     n_exec = run['n_exec']
@@ -167,6 +182,7 @@ def _execute_questions(run_id: str, query_engine, llm, run: dict, nlp, retrieval
     scores             = [[] for _ in questions]
     hallucinations_all = [[] for _ in questions]
     rouge_scores       = [{'rouge1': [], 'rouge2': [], 'rougeL': []} for _ in questions]
+    bert_scores        = [[] for _ in questions]
     last_answers       = [''] * len(questions)
 
     step = 0
@@ -193,8 +209,9 @@ def _execute_questions(run_id: str, query_engine, llm, run: dict, nlp, retrieval
                 rouge_scores[i]['rouge1'].append(rg['rouge1'])
                 rouge_scores[i]['rouge2'].append(rg['rouge2'])
                 rouge_scores[i]['rougeL'].append(rg['rougeL'])
+                bert_scores[i].append(compute_bertscore(answer, q['reference_answer'], lang))
 
-    return _build_per_question_results(questions, scores, hallucinations_all, rouge_scores, last_answers)
+    return _build_per_question_results(questions, scores, hallucinations_all, rouge_scores, bert_scores, last_answers)
 
 
 def _build_global_results(per_question: list, time_seconds: float) -> dict:
@@ -203,6 +220,7 @@ def _build_global_results(per_question: list, time_seconds: float) -> dict:
     all_r1 = [pq['rouge1_mean'] for pq in per_question if pq['rouge1_mean'] is not None]
     all_r2 = [pq['rouge2_mean'] for pq in per_question if pq['rouge2_mean'] is not None]
     all_rouge_l = [pq['rougeL_mean'] for pq in per_question if pq['rougeL_mean'] is not None]
+    all_bs = [pq['bertscore_mean'] for pq in per_question if pq['bertscore_mean'] is not None]
 
     return {
         'score': _aggregate(medias_score),
@@ -210,6 +228,7 @@ def _build_global_results(per_question: list, time_seconds: float) -> dict:
         'avg_rouge1': round(sum(all_r1) / len(all_r1), 4) if all_r1 else None,
         'avg_rouge2': round(sum(all_r2) / len(all_r2), 4) if all_r2 else None,
         'avg_rougeL': round(sum(all_rouge_l) / len(all_rouge_l), 4) if all_rouge_l else None,
+        'avg_bertscore': round(sum(all_bs) / len(all_bs), 4) if all_bs else None,
         'time_seconds': time_seconds
     }
 
@@ -234,8 +253,9 @@ def run_evaluation(run_id: str):
         query_engine, llm = _build_query_engine(run_id, agent, snapshot, file_paths)
 
         retrieval_mode = snapshot.get('rag_config', {}).get('retrieval_mode', 'naive')
+        lang = run.get('language', 'es')
         start_time = time.time()
-        per_question = _execute_questions(run_id, query_engine, llm, run, nlp, retrieval_mode)
+        per_question = _execute_questions(run_id, query_engine, llm, run, nlp, retrieval_mode, lang)
         time_seconds = round(time.time() - start_time, 2)
 
         results = {
