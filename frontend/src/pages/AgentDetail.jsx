@@ -1408,11 +1408,18 @@ export default function AgentDetail() {
                         <div className="flex items-center gap-3">
                           {r.status === 'running' && <span className="text-xs text-orange-500 bg-orange-50 px-2 py-1 rounded-full animate-pulse">Running...</span>}
                           {r.status === 'error' && <span className="text-xs text-red-400 bg-red-50 px-2 py-1 rounded-full">Error</span>}
-                          {r.status === 'done' && r.global_results && (
-                            <span className="text-xs text-green-600 bg-green-50 px-2 py-1 rounded-full">
-                              Score {r.global_results.score.mean}
-                            </span>
-                          )}
+                          {r.status === 'done' && r.global_results && (() => {
+                            const rouge1 = r.global_results.avg_rouge1
+                            const colorClass = rouge1 != null
+                              ? rouge1 >= 0.6 ? 'text-green-600 bg-green-50'
+                                : rouge1 >= 0.4 ? 'text-orange-500 bg-orange-50'
+                                : 'text-red-500 bg-red-50'
+                              : 'text-green-600 bg-green-50'
+                            const label = rouge1 != null
+                              ? `Quality ${Math.round(rouge1 * 100)}%`
+                              : `Score ${r.global_results.score.mean}`
+                            return <span className={`text-xs px-2 py-1 rounded-full ${colorClass}`}>{label}</span>
+                          })()}
                           <button
                             onClick={() => handleDeleteRun(r._id)}
                             className="text-xs text-red-400 hover:text-red-500 transition"
@@ -1430,10 +1437,28 @@ export default function AgentDetail() {
                           {r.status === 'done' && expandedRunDetail.results && (
                             <>
                               <div className="text-xs text-gray-600 grid grid-cols-2 gap-2">
-                                <p>Mean score: <b>{expandedRunDetail.results.global.score.mean}</b> (min {expandedRunDetail.results.global.score.min}, max {expandedRunDetail.results.global.score.max})</p>
-                                {expandedRunDetail.results.global.avg_rouge1 != null && (
-                                  <p>ROUGE-1/2/L: {expandedRunDetail.results.global.avg_rouge1} / {expandedRunDetail.results.global.avg_rouge2} / {expandedRunDetail.results.global.avg_rougeL}</p>
-                                )}
+                                <p>Binary score: <b>{expandedRunDetail.results.global.score.mean}</b> (min {expandedRunDetail.results.global.score.min}, max {expandedRunDetail.results.global.score.max})</p>
+                                {expandedRunDetail.results.global.avg_rouge1 != null && (() => {
+                                  const r1 = expandedRunDetail.results.global.avg_rouge1
+                                  const r2 = expandedRunDetail.results.global.avg_rouge2
+                                  const rL = expandedRunDetail.results.global.avg_rougeL
+                                  const color = r1 >= 0.6 ? '#16a34a' : r1 >= 0.4 ? '#f97316' : '#dc2626'
+                                  return (
+                                    <p title="Lexical overlap percentage with the expected answer">
+                                      Quality (ROUGE-1): <b style={{ color }}>{Math.round(r1 * 100)}%</b>
+                                      <span className="text-gray-400"> · ROUGE-2: {r2} · ROUGE-L: {rL}</span>
+                                    </p>
+                                  )
+                                })()}
+                                {expandedRunDetail.results.global.avg_bertscore != null && (() => {
+                                  const bs = expandedRunDetail.results.global.avg_bertscore
+                                  const color = bs >= 0.6 ? '#16a34a' : bs >= 0.4 ? '#f97316' : '#dc2626'
+                                  return (
+                                    <p title="Semantic similarity with the expected answer using BERT embeddings">
+                                      BERTScore: <b style={{ color }}>{Math.round(bs * 100)}%</b>
+                                    </p>
+                                  )
+                                })()}
                                 {r.xai && (
                                   <p>Avg. hallucinations: {expandedRunDetail.results.global.avg_hallucinations}</p>
                                 )}
@@ -1491,8 +1516,16 @@ export default function AgentDetail() {
                                   <div key={pq.question} className="bg-white border border-gray-100 rounded-lg px-3 py-2">
                                     <p className="text-xs font-medium text-gray-700">{pq.question}</p>
                                     <p className="text-xs text-gray-400 mt-1">{pq.last_answer}</p>
-                                    <p className="text-xs text-gray-500 mt-1">
-                                      Score: {pq.score.mean} {pq.rouge1_mean != null && `· ROUGE-1 ${pq.rouge1_mean}`} {r.xai && `· Hallucinations ${pq.hallucinations_mean}`}
+                                    <p className="text-xs mt-1">
+                                      {pq.rouge1_mean != null ? (() => {
+                                        const color = pq.rouge1_mean >= 0.6 ? '#16a34a' : pq.rouge1_mean >= 0.4 ? '#f97316' : '#dc2626'
+                                        return <span style={{ color }}>Quality: {Math.round(pq.rouge1_mean * 100)}%</span>
+                                      })() : <span className="text-gray-500">Score: {pq.score.mean}</span>}
+                                      {pq.bertscore_mean != null && (() => {
+                                        const color = pq.bertscore_mean >= 0.6 ? '#16a34a' : pq.bertscore_mean >= 0.4 ? '#f97316' : '#dc2626'
+                                        return <span style={{ color }}> · BERTScore: {Math.round(pq.bertscore_mean * 100)}%</span>
+                                      })()}
+                                      {r.xai && <span className="text-gray-400"> · Hallucinations {pq.hallucinations_mean}</span>}
                                     </p>
                                   </div>
                                 ))}
