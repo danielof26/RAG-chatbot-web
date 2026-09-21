@@ -43,7 +43,7 @@ def semantics(text: str, nlp) -> list:
 def validate(rag_answer: str, keys_string: str, nlp) -> float:
     """Scores a RAG answer by checking how many keywords are present after lemmatisation."""
     sem_answer = semantics(rag_answer, nlp)
-    key_list = [k.strip() for k in keys_string.split(',') if k.strip()]
+    key_list = [k.strip() for k in keys_string.split('|') if k.strip()]
     if not key_list:
         return 0.0
     n_found = sum(1 for k in key_list if any(s in sem_answer for s in semantics(k, nlp)))
@@ -65,10 +65,11 @@ def compute_bertscore(generated: str, reference: str, lang: str = 'es') -> float
     try:
         if lang not in _bert_scorers:
             from bert_score import BERTScorer
-            _bert_scorers[lang] = BERTScorer(lang=lang, rescale_with_baseline=False)
+            _bert_scorers[lang] = BERTScorer(model_type="xlm-roberta-large", num_layers=17, rescale_with_baseline=False)
         _, _, F1 = _bert_scorers[lang].score([generated], [reference])
         return round(float(F1[0]), 4)
-    except Exception:
+    except Exception as e:
+        print(f"[BERTScore ERROR] {e}")
         return None
 
 
