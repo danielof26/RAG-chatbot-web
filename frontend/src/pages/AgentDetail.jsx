@@ -1273,9 +1273,26 @@ export default function AgentDetail() {
                     <div key={s._id} className="flex items-center justify-between border border-gray-100 rounded-lg px-4 py-3">
                       <div>
                         <p className="text-sm text-gray-700">{s.name}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          top_k={s.rag_config?.similarity_top_k} · chunk={s.rag_config?.chunk_size}/{s.rag_config?.chunk_overlap} · temp={s.rag_config?.temperature} · {s.rag_config?.retrieval_mode ?? 'naive'} · {s.llm_model || 'default model'}
-                        </p>
+                        {s.rag_config && (() => {
+                          const cfg = s.rag_config
+                          const tags = [
+                            cfg.retrieval_mode && `retrieval: ${cfg.retrieval_mode}`,
+                            cfg.synthesis_mode && `synthesis: ${cfg.synthesis_mode}`,
+                            cfg.similarity_top_k != null && `top_k: ${cfg.similarity_top_k}`,
+                            cfg.chunk_size != null && `chunk: ${cfg.chunk_size}/${cfg.chunk_overlap ?? 0}`,
+                            cfg.temperature != null && `temp: ${cfg.temperature}`,
+                            cfg.rerank && `rerank`,
+                            cfg.sim_filter && `sim_filter: ${cfg.similarity_cutoff ?? ''}`,
+                            s.llm_model && `model: ${s.llm_model}`,
+                          ].filter(Boolean)
+                          return (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {tags.map(t => (
+                                <span key={t} className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">{t}</span>
+                              ))}
+                            </div>
+                          )
+                        })()}
                       </div>
                       <button
                         onClick={() => handleDeleteSnapshot(s._id)}
@@ -1434,6 +1451,25 @@ export default function AgentDetail() {
                           {r.status === 'error' && (
                             <p className="text-sm text-red-500">{expandedRunDetail.error}</p>
                           )}
+                          {r.rag_config && Object.keys(r.rag_config).length > 0 && (() => {
+                            const cfg = r.rag_config
+                            const tags = [
+                              cfg.retrieval_mode && `retrieval: ${cfg.retrieval_mode}`,
+                              cfg.synthesis_mode && `synthesis: ${cfg.synthesis_mode}`,
+                              cfg.similarity_top_k != null && `top_k: ${cfg.similarity_top_k}`,
+                              cfg.chunk_size != null && `chunk: ${cfg.chunk_size}/${cfg.chunk_overlap ?? 0}`,
+                              cfg.temperature != null && `temp: ${cfg.temperature}`,
+                              cfg.rerank && `rerank`,
+                              cfg.sim_filter && `sim_filter: ${cfg.similarity_cutoff ?? ''}`,
+                            ].filter(Boolean)
+                            return (
+                              <div className="flex flex-wrap gap-1">
+                                {tags.map(t => (
+                                  <span key={t} className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">{t}</span>
+                                ))}
+                              </div>
+                            )
+                          })()}
                           {r.status === 'done' && expandedRunDetail.results && (
                             <>
                               <div className="text-xs text-gray-600 grid grid-cols-2 gap-2">
@@ -1468,15 +1504,31 @@ export default function AgentDetail() {
                               {/* Score per question line chart */}
                               {(() => {
                                 const data = expandedRunDetail.results.per_question
-                                const W = 500, H = 120, padL = 30, padR = 10, padT = 12, padB = 24
+                                const W = 500, H = 148, padL = 30, padR = 10, padT = 26, padB = 24
                                 const chartW = W - padL - padR
                                 const chartH = H - padT - padB
                                 const cx = i => padL + (chartW / (data.length - 1 || 1)) * i
                                 const cy = s => padT + chartH * (1 - s)
-                                const points = data.map((pq, i) => `${cx(i)},${cy(pq.score.mean)}`).join(' ')
+                                const binPoints = data.map((pq, i) => `${cx(i)},${cy(pq.score.mean)}`).join(' ')
+                                const r1Points = data.map((pq, i) => pq.rouge1_mean != null ? `${cx(i)},${cy(pq.rouge1_mean)}` : null).filter(Boolean).join(' ')
+                                const bsPoints = data.map((pq, i) => pq.bertscore_mean != null ? `${cx(i)},${cy(pq.bertscore_mean)}` : null).filter(Boolean).join(' ')
+                                const hasRouge = data.some(pq => pq.rouge1_mean != null)
+                                const hasBert = data.some(pq => pq.bertscore_mean != null)
                                 const ticks = [0, 0.5, 1]
                                 return (
-                                  <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 120 }}>
+                                  <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 148 }}>
+                                    {/* Legend */}
+                                    <circle cx={padL} cy={10} r={3} fill="#fb923c" />
+                                    <text x={padL + 6} y={13} fontSize="8" fill="#9ca3af">Binary</text>
+                                    {hasRouge && <>
+                                      <line x1={padL + 46} y1={10} x2={padL + 56} y2={10} stroke="#60a5fa" strokeWidth="2" />
+                                      <text x={padL + 60} y={13} fontSize="8" fill="#9ca3af">ROUGE-1</text>
+                                    </>}
+                                    {hasBert && <>
+                                      <line x1={padL + 116} y1={10} x2={padL + 126} y2={10} stroke="#34d399" strokeWidth="2" />
+                                      <text x={padL + 130} y={13} fontSize="8" fill="#9ca3af">BERTScore</text>
+                                    </>}
+                                    {/* Grid */}
                                     {ticks.map(t => {
                                       const y = cy(t)
                                       return (
@@ -1486,21 +1538,34 @@ export default function AgentDetail() {
                                         </g>
                                       )
                                     })}
-                                    <polyline points={points} fill="none" stroke="#fb923c" strokeWidth="2" strokeLinejoin="round" />
+                                    {/* Lines */}
+                                    {hasRouge && <polyline points={r1Points} fill="none" stroke="#60a5fa" strokeWidth="1.5" strokeLinejoin="round" />}
+                                    {hasBert && <polyline points={bsPoints} fill="none" stroke="#34d399" strokeWidth="1.5" strokeLinejoin="round" />}
+                                    <polyline points={binPoints} fill="none" stroke="#fb923c" strokeWidth="2" strokeLinejoin="round" />
+                                    {/* Dots + tooltips */}
                                     {data.map((pq, i) => {
                                       const score = pq.score.mean
                                       const x = cx(i), y = cy(score)
                                       const hovered = chartHoveredIdx === i
-                                      const tooltipY = Math.max(y - 18, padT)
-                                      const tooltipX = Math.min(Math.max(x - 14, padL), W - padR - 28)
+                                      const tooltipLines = [
+                                        { label: 'Bin', value: score.toFixed(2), color: '#fb923c' },
+                                        pq.rouge1_mean != null && { label: 'R1', value: pq.rouge1_mean.toFixed(2), color: '#60a5fa' },
+                                        pq.bertscore_mean != null && { label: 'BS', value: pq.bertscore_mean.toFixed(2), color: '#34d399' },
+                                      ].filter(Boolean)
+                                      const ttH = 6 + tooltipLines.length * 11
+                                      const ttW = 44
+                                      const tooltipY = Math.max(y - ttH - 4, padT)
+                                      const tooltipX = Math.min(Math.max(x - ttW / 2, padL), W - padR - ttW)
                                       return (
                                         <g key={i} onMouseEnter={() => setChartHoveredIdx(i)} onMouseLeave={() => setChartHoveredIdx(null)} style={{ cursor: 'default' }}>
-                                          <circle cx={x} cy={y} r={hovered ? 5 : 4} fill="white" stroke={hovered ? '#f97316' : '#fb923c'} strokeWidth="2" />
+                                          <circle cx={x} cy={y} r={hovered ? 5 : 3} fill="white" stroke={hovered ? '#f97316' : '#fb923c'} strokeWidth="2" />
                                           <text x={x} y={H - 6} fontSize="8" fill="#9ca3af" textAnchor="middle">Q{i + 1}</text>
                                           {hovered && (
                                             <g>
-                                              <rect x={tooltipX} y={tooltipY} width={28} height={14} fill="#1f2937" rx="3" />
-                                              <text x={tooltipX + 14} y={tooltipY + 10} fontSize="9" fill="white" textAnchor="middle">{score.toFixed(2)}</text>
+                                              <rect x={tooltipX} y={tooltipY} width={ttW} height={ttH} fill="#1f2937" rx="3" />
+                                              {tooltipLines.map((tl, ti) => (
+                                                <text key={ti} x={tooltipX + 4} y={tooltipY + 10 + ti * 11} fontSize="8" fill={tl.color}>{tl.label}: {tl.value}</text>
+                                              ))}
                                             </g>
                                           )}
                                         </g>
@@ -1517,10 +1582,15 @@ export default function AgentDetail() {
                                     <p className="text-xs font-medium text-gray-700">{pq.question}</p>
                                     <p className="text-xs text-gray-400 mt-1">{pq.last_answer}</p>
                                     <p className="text-xs mt-1">
-                                      {pq.rouge1_mean != null ? (() => {
+                                      {(() => {
+                                        const bin = pq.score.mean
+                                        const color = bin >= 1 ? '#16a34a' : bin > 0 ? '#f97316' : '#dc2626'
+                                        return <span style={{ color }}>Binary: {bin.toFixed(2)}</span>
+                                      })()}
+                                      {pq.rouge1_mean != null && (() => {
                                         const color = pq.rouge1_mean >= 0.6 ? '#16a34a' : pq.rouge1_mean >= 0.4 ? '#f97316' : '#dc2626'
-                                        return <span style={{ color }}>Quality: {Math.round(pq.rouge1_mean * 100)}%</span>
-                                      })() : <span className="text-gray-500">Score: {pq.score.mean}</span>}
+                                        return <span style={{ color }}> · Quality: {Math.round(pq.rouge1_mean * 100)}%</span>
+                                      })()}
                                       {pq.bertscore_mean != null && (() => {
                                         const color = pq.bertscore_mean >= 0.6 ? '#16a34a' : pq.bertscore_mean >= 0.4 ? '#f97316' : '#dc2626'
                                         return <span style={{ color }}> · BERTScore: {Math.round(pq.bertscore_mean * 100)}%</span>
