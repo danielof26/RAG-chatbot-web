@@ -27,3 +27,5 @@ chromadb_data/
 
 *.log
 logs/
+
+datasets/
