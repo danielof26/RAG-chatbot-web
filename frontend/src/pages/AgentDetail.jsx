@@ -33,7 +33,18 @@ const RAG_SECTIONS = [
     ]
   },
   {
-    id: 'ret', num: 3,
+    id: 'chunk', num: 3,
+    title: 'Chunking · Document preprocessing',
+    desc: 'How documents are split before indexing. Choose one. Changes apply only when re-indexing.',
+    techniques: [
+      { id: 'fixed_size',     label: 'Fixed-size',            impl: true,  desc: 'Splits by token count. Configure size and overlap in the fields below.',    incompat: ['sent_window','semantic_chunk','hierarchical'] },
+      { id: 'sent_window',    label: 'Sentence window',       impl: false, desc: 'Chunks by sentence and retrieves with a surrounding context window.',       incompat: ['fixed_size','semantic_chunk','hierarchical'] },
+      { id: 'semantic_chunk', label: 'Semantic chunking',     impl: false, desc: 'Splits at semantic boundaries detected by embedding similarity.',           incompat: ['fixed_size','sent_window','hierarchical'] },
+      { id: 'hierarchical',   label: 'Hierarchical chunking', impl: false, desc: 'Creates chunks at multiple granularity levels (parent + child nodes).',    incompat: ['fixed_size','sent_window','semantic_chunk'] },
+    ]
+  },
+  {
+    id: 'ret', num: 4,
     title: 'Retrieval · Retriever strategy',
     desc: 'How relevant nodes are searched within the index. All combinable — Fusion is literally dense + sparse together.',
     techniques: [
@@ -46,7 +57,7 @@ const RAG_SECTIONS = [
     ]
   },
   {
-    id: 'post', num: 4,
+    id: 'post', num: 5,
     title: 'Post-retrieval · Filtering & reranking',
     desc: 'Applied after retrieval to improve chunk quality. Most are combinable in pipeline — except the two reranking methods, choose one.',
     techniques: [
@@ -61,7 +72,7 @@ const RAG_SECTIONS = [
     ]
   },
   {
-    id: 'syn', num: 5,
+    id: 'syn', num: 6,
     title: 'Response synthesis',
     desc: 'How retrieved chunks are assembled into the final answer. Choose one — mutually exclusive.',
     techniques: [
@@ -70,17 +81,6 @@ const RAG_SECTIONS = [
       { id: 'tree_summarize',   label: 'Tree Summarize',    impl: true, desc: 'Builds a summary tree bottom-up — best for very long documents.',                incompat: ['compact','refine','simple_summarize','accumulate'] },
       { id: 'simple_summarize', label: 'Simple Summarize',  impl: true, desc: 'Truncates all chunks into a single prompt — fastest but may lose information.', incompat: ['compact','refine','tree_summarize','accumulate'] },
       { id: 'accumulate',       label: 'Accumulate',        impl: true, desc: 'Generates an answer per chunk independently, then combines them.',               incompat: ['compact','refine','tree_summarize','simple_summarize'] },
-    ]
-  },
-  {
-    id: 'chunk', num: 6,
-    title: 'Chunking · Document preprocessing',
-    desc: 'How documents are split before indexing. Choose one. Changes apply only when re-indexing.',
-    techniques: [
-      { id: 'fixed_size',     label: 'Fixed-size',            impl: true,  desc: 'Splits by token count. Configure size and overlap in the fields below.',    incompat: ['sent_window','semantic_chunk','hierarchical'] },
-      { id: 'sent_window',    label: 'Sentence window',       impl: false, desc: 'Chunks by sentence and retrieves with a surrounding context window.',       incompat: ['fixed_size','semantic_chunk','hierarchical'] },
-      { id: 'semantic_chunk', label: 'Semantic chunking',     impl: false, desc: 'Splits at semantic boundaries detected by embedding similarity.',           incompat: ['fixed_size','sent_window','hierarchical'] },
-      { id: 'hierarchical',   label: 'Hierarchical chunking', impl: false, desc: 'Creates chunks at multiple granularity levels (parent + child nodes).',    incompat: ['fixed_size','sent_window','semantic_chunk'] },
     ]
   },
 ]
