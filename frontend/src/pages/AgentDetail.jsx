@@ -523,6 +523,35 @@ export default function AgentDetail() {
     if (res.ok) setExpandedRunDetail(await res.json())
   }
 
+  const handleDownloadCSV = async (r) => {
+    let detail = (expandedRunId === r._id && expandedRunDetail) ? expandedRunDetail : null
+    if (!detail) {
+      const res = await fetch(`/api/agents/${id}/evaluations/${r._id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (!res.ok) return
+      detail = await res.json()
+    }
+    const perQ = detail.results?.per_question ?? []
+    const rows = [
+      'Question;answer;Binary;Quality;BERT',
+      ...perQ.map(pq => [
+        `"${(pq.question  ?? '').replace(/"/g, '""')}"`,
+        `"${(pq.last_answer ?? '').replace(/"/g, '""')}"`,
+        pq.score?.mean ?? '',
+        pq.rouge1_mean  ?? '',
+        pq.bertscore_mean ?? '',
+      ].join(';'))
+    ].join('\n')
+    const blob = new Blob([rows], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `eval_${r.snapshot_name.replace(/\s+/g,'_')}_${r._id.slice(-6)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const handleDeleteRun = async (runId) => {
     if (!globalThis.confirm('Delete this evaluation run? This cannot be undone.')) return
     await fetch(`/api/agents/${id}/evaluations/${runId}`, {
@@ -1443,6 +1472,17 @@ export default function AgentDetail() {
                           >
                             Delete
                           </button>
+                          {r.status === 'done' && (
+                            <button
+                              onClick={e => { e.stopPropagation(); handleDownloadCSV(r) }}
+                              title="Download results as CSV"
+                              className="text-gray-400 hover:text-gray-600 transition"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 3v12" />
+                              </svg>
+                            </button>
+                          )}
                         </div>
                       </div>
 
