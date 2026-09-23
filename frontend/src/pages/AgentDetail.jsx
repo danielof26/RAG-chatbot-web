@@ -17,7 +17,7 @@ const RAG_SECTIONS = [
       { id: 'multi_query',   label: 'Multi-Query',          impl: false, desc: 'Generates N reformulations of the question and fuses all results to improve recall.',     incompat: [] },
       { id: 'step_back',     label: 'Step-back Prompting',  impl: false, desc: 'Abstracts the question to a higher-level concept before retrieving.',                     incompat: [] },
       { id: 'sub_question',  label: 'Sub-question Engine',  impl: false, desc: 'Decomposes complex questions into sub-questions, each with its own retrieval.',           incompat: [] },
-      { id: 'router',        label: 'Router Adaptativo',    impl: true,  desc: 'Classifies the query type (factual, multi-hop, summary, out-of-domain) and routes it to the most suitable engine automatically.',        incompat: ['hyde_answer', 'hyde_combined', 'crag', 'self_rag'] },
+      { id: 'router',        label: 'Adaptive Router',       impl: true,  desc: 'Classifies the query type (factual, multi-hop, summary, out-of-domain) and routes it to the most suitable engine automatically.',        incompat: ['hyde_answer', 'hyde_combined', 'crag', 'self_rag'] },
     ]
   },
   {
