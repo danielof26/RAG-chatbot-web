@@ -99,6 +99,7 @@ orjson==3.11.9
 overrides==7.7.0
 packaging==26.2
 pillow>=12.0.0
+pystemmer==2.2.0.3
 platformdirs==4.9.6
 pluggy==1.6.0
 propcache==0.5.2
