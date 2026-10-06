@@ -126,7 +126,7 @@ def create_evaluation(agent_id):
         return jsonify({'error': 'The CSV file has no questions'}), 400
 
     language = request.form.get('language', 'en').strip()
-    xai = request.form.get('xai', 'false').strip().lower() == 'true'
+    xai = bool(snapshot.get('rag_config', {}).get('xai', False))
     try:
         n_exec = max(1, int(request.form.get('n_exec', 1)))
     except ValueError:
