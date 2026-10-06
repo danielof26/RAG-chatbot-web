@@ -161,6 +161,41 @@ def _build_router_engine(index, llm, top_k: int):
     return RouterQueryEngine(selector=LLMSingleSelector.from_defaults(), query_engine_tools=tools, verbose=True)
 
 
+def _build_raptor_engine(agent_id: str, chroma_collection, top_k: int, synthesis_mode: str):
+    from llama_index.core.query_engine import RetrieverQueryEngine
+    from llama_index.core import Document
+    from services.raptor_retriever import RaptorRetriever
+
+    db = chromadb.PersistentClient(path=config.CHROMA_PATH)
+    raptor_chroma = db.get_or_create_collection(f"agent_{agent_id}_raptor")
+    raptor_vector_store = ChromaVectorStore(chroma_collection=raptor_chroma)
+
+    if raptor_chroma.count() == 0:
+        print(f"[RAPTOR] Building tree for agent {agent_id}...")
+        raw = chroma_collection.get(include=['documents', 'metadatas'])
+        documents = [
+            Document(text=text, metadata=meta or {})
+            for text, meta in zip(raw['documents'], raw['metadatas'])
+        ]
+    else:
+        print(f"[RAPTOR] Reusing existing tree ({raptor_chroma.count()} nodes) for agent {agent_id}.")
+        documents = []
+
+    retriever = RaptorRetriever(
+        documents,
+        embed_model=Settings.embed_model,
+        llm=Settings.llm,
+        vector_store=raptor_vector_store,
+        similarity_top_k=top_k,
+        tree_depth=2,
+        mode="collapsed",
+    )
+
+    return RetrieverQueryEngine.from_args(retriever, response_mode=synthesis_mode)
+
+
+
+
 def _build_fusion_engine(index, chroma_collection, top_k: int, top_q: int):
     from llama_index.core.retrievers import QueryFusionRetriever
     from llama_index.retrievers.bm25 import BM25Retriever
@@ -217,11 +252,15 @@ def query_agent(agent_id: str, question: str, agent_config: dict) -> str:
         query_engine = _build_router_engine(index, Settings.llm, top_k)
     elif retrieval_mode == 'fusion':
         query_engine = _build_fusion_engine(index, chroma_collection, top_k, top_q)
+    elif retrieval_mode == 'raptor':
+        query_engine = _build_raptor_engine(agent_id, chroma_collection, top_k, synthesis_mode)
     else:
         query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
                                              node_postprocessors=postprocessors)
     strategy = get_query_strategy(retrieval_mode)
     answer, _ = strategy.execute(query_engine, question, Settings.llm)
+    if not answer or not answer.strip():
+        answer = "I could not find relevant information in the documents to answer this question."
     return answer
 
 
@@ -245,7 +284,6 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict):
     synthesis_mode     = rag_config.get('synthesis_mode', 'compact')
     similarity_cutoff  = rag_config.get('similarity_cutoff') if rag_config.get('sim_filter') else None
     rerank             = rag_config.get('rerank', False)
-
     index = VectorStoreIndex.from_vector_store(vector_store, storage_context=storage_context)
     postprocessors = []
     if similarity_cutoff:
@@ -256,11 +294,13 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict):
         query_engine = _build_router_engine(index, Settings.llm, top_k)
     elif retrieval_mode == 'fusion':
         query_engine = _build_fusion_engine(index, chroma_collection, top_k, top_q)
+    elif retrieval_mode == 'raptor':
+        query_engine = _build_raptor_engine(agent_id, chroma_collection, top_k, synthesis_mode)
     else:
         query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
                                              node_postprocessors=postprocessors, streaming=True)
     strategy = get_query_strategy(retrieval_mode)
-    if retrieval_mode in ('self_rag', 'router', 'fusion'):
+    if retrieval_mode in ('self_rag', 'router', 'fusion', 'raptor'):
         answer, _ = strategy.execute(query_engine, question, Settings.llm)
         for word in answer.split(' '):
             yield word + ' '
@@ -288,8 +328,9 @@ def delete_agent_collection(agent_id: str):
     """
     Borra la colección ChromaDB del agente cuando se elimina el agente.
     """
-    try:
-        db = chromadb.PersistentClient(path=config.CHROMA_PATH)
-        db.delete_collection(f"agent_{agent_id}")
-    except Exception:
-        pass
+    db = chromadb.PersistentClient(path=config.CHROMA_PATH)
+    for name in (f"agent_{agent_id}", f"agent_{agent_id}_raptor"):
+        try:
+            db.delete_collection(name)
+        except Exception:
+            pass

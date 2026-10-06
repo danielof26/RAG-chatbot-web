@@ -52,7 +52,8 @@ const RAG_SECTIONS = [
       { id: 'bm25',           label: 'BM25 (sparse/keyword)',   impl: false, desc: 'Classic keyword retrieval — complements dense search for exact terms.',    incompat: [] },
       { id: 'auto_merging',   label: 'Auto-Merging',            impl: false, desc: 'Merges child chunks into parent when enough siblings are retrieved.',      incompat: [] },
       { id: 'recursive',      label: 'Recursive Retriever',     impl: false, desc: 'Follows references between nodes recursively to complete context.',       incompat: [] },
-      { id: 'fusion',         label: 'Fusion (dense + sparse)', impl: true,  desc: 'Combines vector and BM25 retrievers with reciprocal rank fusion for hybrid retrieval.',  incompat: ['hyde_answer', 'hyde_combined', 'crag', 'self_rag', 'router'] },
+      { id: 'fusion',         label: 'Fusion (dense + sparse)', impl: true,  desc: 'Combines vector and BM25 retrievers with reciprocal rank fusion for hybrid retrieval.',  incompat: ['hyde_answer', 'hyde_combined', 'crag', 'self_rag', 'router', 'raptor'] },
+      { id: 'raptor',         label: 'RAPTOR (hierarchical tree)', impl: true, desc: 'Recursively clusters chunks by embedding similarity, generates LLM summaries per cluster and organises them into a tree. Retrieval traverses the tree to return both fine-grained and high-level nodes. Ideal for long or structured documents. The first query builds the index — subsequent ones reuse it.', incompat: ['fusion', 'router', 'hyde_answer', 'hyde_combined'] },
       { id: 'auto_retrieval', label: 'Auto-Retrieval',          impl: false, desc: 'Extracts metadata filters from the query to narrow the search space.',   incompat: [] },
     ]
   },
@@ -66,6 +67,7 @@ const RAG_SECTIONS = [
       { id: 'rerank_ce',    label: 'Reranking (cross-encoder)', impl: true, desc: 'Reranks chunks using a sentence-transformer cross-encoder model.',       incompat: ['crag','rerank_llm'] },
       { id: 'rerank_llm',   label: 'Reranking (LLM)',          impl: false, desc: 'Reranks chunks by asking the LLM to score each one for relevance.',     incompat: ['crag','rerank_ce'] },
       { id: 'sim_filter',   label: 'SimilarityPostprocessor',  impl: true,  desc: 'Discards chunks whose similarity score is below a set threshold.',       incompat: [] },
+      { id: 'xai',          label: 'XAI — Explainable RAG',   impl: true,  desc: 'After synthesis, verifies that each cited fragment exists verbatim in the retrieved chunks. Retries up to 2 times if hallucinations are detected. Produces a full traceability log.', incompat: [] },
       { id: 'kw_filter',    label: 'KeywordNodePostprocessor', impl: false, desc: 'Filters chunks that do not contain required keywords.',                  incompat: [] },
       { id: 'prev_next',    label: 'PrevNextNodePostprocessor',impl: false, desc: 'Expands each retrieved chunk with its neighbouring chunks for context.', incompat: [] },
       { id: 'long_reorder', label: 'LongContextReorder',       impl: false, desc: 'Reorders chunks to place the most relevant at start and end of prompt.',incompat: [] },
@@ -95,6 +97,7 @@ const MODE_TECHS = {
   self_rag:      ['naive', 'self_rag', 'compact'],
   router:        ['router',            'compact'],
   fusion:        ['fusion',            'compact'],
+  raptor:        ['raptor',            'compact'],
 }
 
 const initTechsFromMode = (mode) => {
@@ -103,7 +106,7 @@ const initTechsFromMode = (mode) => {
   return t
 }
 
-const MODE_PRIORITY = ['crag', 'self_rag', 'router', 'fusion', 'hyde_combined', 'hyde_answer', 'naive']
+const MODE_PRIORITY = ['crag', 'self_rag', 'router', 'raptor', 'fusion', 'hyde_combined', 'hyde_answer', 'naive']
 
 const computeRetrievalMode = (techs) =>
   MODE_PRIORITY.find(mode => techs.has(mode)) ?? 'naive'
@@ -175,7 +178,7 @@ export default function AgentDetail() {
   const [evalSnapshotId, setEvalSnapshotId] = useState('')
   const [evalLanguage, setEvalLanguage] = useState('en')
   const [evalNExec, setEvalNExec] = useState(3)
-  const [evalXai, setEvalXai] = useState(false)
+
   const [runningEval, setRunningEval] = useState(false)
   const [evalMsg, setEvalMsg] = useState('')
   const [evalRuns, setEvalRuns] = useState([])
@@ -273,6 +276,7 @@ export default function AgentDetail() {
     if (synthMode !== 'compact') { techs.delete('compact'); techs.add(synthMode) }
     if (data.rag_config?.sim_filter) techs.add('sim_filter')
     if (data.rag_config?.rerank)     techs.add('rerank_ce')
+    if (data.rag_config?.xai)        techs.add('xai')
     setSelectedTechs(techs)
     setLoading(false)
   }
@@ -440,7 +444,8 @@ export default function AgentDetail() {
           similarity_cutoff: Number(similarityCutoff),
           rerank: selectedTechs.has('rerank_ce'),
           rerank_top_n: Number(rerankTopN),
-          fusion_num_queries: Number(fusionNumQueries)
+          fusion_num_queries: Number(fusionNumQueries),
+          xai: selectedTechs.has('xai')
         }
       })
     })
@@ -494,7 +499,7 @@ export default function AgentDetail() {
     form.append('snapshot_id', evalSnapshotId)
     form.append('language', evalLanguage)
     form.append('n_exec', evalNExec)
-    form.append('xai', evalXai)
+
 
     const res = await fetch(`/api/agents/${id}/evaluations`, {
       method: 'POST',
@@ -1235,7 +1240,7 @@ export default function AgentDetail() {
                   </div>
                 )}
 
-                {/* Synthesis: temperature + XAI note */}
+                {/* Synthesis: temperature */}
                 {section.id === 'syn' && (
                   <div className="space-y-3 pt-1 border-t border-gray-50">
                     <div className="mt-3">
@@ -1248,10 +1253,6 @@ export default function AgentDetail() {
                         className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
                       />
                       <p className="text-xs text-gray-400 mt-1">Lower = more consistent, fact-focused. Higher = more varied, creative.</p>
-                    </div>
-                    <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-3">
-                      <p className="text-xs font-semibold text-blue-700 mb-0.5">XAI — Explainable RAG</p>
-                      <p className="text-xs text-blue-600 leading-relaxed">Adds citation tracking and hallucination detection per answer. Enable it per evaluation run in the Evaluation tab.</p>
                     </div>
                   </div>
                 )}
@@ -1398,18 +1399,6 @@ export default function AgentDetail() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <input
-                    id="eval-xai-checkbox"
-                    type="checkbox"
-                    checked={evalXai}
-                    onChange={e => setEvalXai(e.target.checked)}
-                    className="w-4 h-4 accent-orange-400"
-                  />
-                  <label htmlFor="eval-xai-checkbox" className="text-sm text-gray-600">
-                    XAI mode — check citations and detect hallucinations (slower, more LLM calls per question)
-                  </label>
-                </div>
 
                 <div className="flex items-center justify-end gap-3 pt-2">
                   {evalMsg && <span className="text-sm text-gray-400">{evalMsg}</span>}

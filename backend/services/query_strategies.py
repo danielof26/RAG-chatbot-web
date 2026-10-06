@@ -156,6 +156,7 @@ _STRATEGIES = {
     'self_rag':      SelfRAGStrategy,
     'router':        NaiveStrategy,
     'fusion':        NaiveStrategy,
+    'raptor':        NaiveStrategy,
 }
 
 
