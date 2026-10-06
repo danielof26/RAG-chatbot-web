@@ -7,7 +7,7 @@ A web platform for building, configuring and evaluating RAG (Retrieval-Augmented
 - Python 3.10+
 - Node.js 18+
 - MongoDB running on `localhost:27017`
-- [Ollama](https://ollama.com) with at least one LLM and one embedding model pulled — can run locally or on a remote server (configurable per agent via the LLM Server settings). OpenAI and Gemini are also supported as providers.
+- [Ollama](https://ollama.com) with at least one LLM and one embedding model pulled, can run locally or on a remote server (configurable per agent via the LLM Server settings). OpenAI and Gemini are also supported as providers.
 
 ## Installation
 
@@ -24,7 +24,7 @@ python app.py
 ```bash
 cd frontend
 npm install
-npm run dev      # Vite dev server with hot reload — proxies /api to localhost:5001
+npm run dev
 ```
 
 **Frontend** (production / VM deployment)
@@ -32,7 +32,7 @@ npm run dev      # Vite dev server with hot reload — proxies /api to localhost
 ```bash
 cd frontend
 npm install
-npm run build    # Builds static files into frontend/dist/
+npm run build
 ```
 
 Flask automatically serves the built frontend from `frontend/dist/` — no separate server needed.
