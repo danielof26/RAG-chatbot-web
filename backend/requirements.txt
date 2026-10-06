@@ -161,3 +161,4 @@ torch==2.14.0
 bert-score==0.3.13
 docx2txt==0.9
 llama-index-readers-file==0.7.0
+llama-index-packs-raptor==0.4.2
