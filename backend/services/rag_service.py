@@ -2,6 +2,7 @@ from llama_index.core import VectorStoreIndex, Settings, SimpleDirectoryReader, 
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.postprocessor import SimilarityPostprocessor
 from llama_index.core.postprocessor import SentenceTransformerRerank
+from llama_index.core.postprocessor import LongContextReorder
 from llama_index.llms.ollama import Ollama
 import chromadb
 from llama_index.vector_stores.chroma import ChromaVectorStore
@@ -294,6 +295,7 @@ def query_agent(agent_id: str, question: str, agent_config: dict, chat_history: 
     synthesis_mode     = rag_config.get('synthesis_mode', 'compact')
     similarity_cutoff  = rag_config.get('similarity_cutoff') if rag_config.get('sim_filter') else None
     rerank             = rag_config.get('rerank', False)
+    long_reorder       = rag_config.get('long_reorder', False)
 
     # Conversational memory: reformulate question or build synthesis context
     effective_question = question
@@ -318,6 +320,8 @@ def query_agent(agent_id: str, question: str, agent_config: dict, chat_history: 
         postprocessors.append(SimilarityPostprocessor(similarity_cutoff=similarity_cutoff))
     if rerank:
         postprocessors.append(SentenceTransformerRerank(model='cross-encoder/ms-marco-MiniLM-L-6-v2', top_n=rag_config.get('rerank_top_n', 3)))
+    if long_reorder:
+        postprocessors.append(LongContextReorder())
     if retrieval_mode == 'router':
         query_engine = _build_router_engine(index, Settings.llm, top_k)
     elif retrieval_mode == 'fusion':
@@ -358,6 +362,7 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict, chat_hi
     synthesis_mode     = rag_config.get('synthesis_mode', 'compact')
     similarity_cutoff  = rag_config.get('similarity_cutoff') if rag_config.get('sim_filter') else None
     rerank             = rag_config.get('rerank', False)
+    long_reorder       = rag_config.get('long_reorder', False)
 
     # Conversational memory
     effective_question = question
@@ -382,6 +387,8 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict, chat_hi
         postprocessors.append(SimilarityPostprocessor(similarity_cutoff=similarity_cutoff))
     if rerank:
         postprocessors.append(SentenceTransformerRerank(model='cross-encoder/ms-marco-MiniLM-L-6-v2', top_n=rag_config.get('rerank_top_n', 3)))
+    if long_reorder:
+        postprocessors.append(LongContextReorder())
     if retrieval_mode == 'router':
         query_engine = _build_router_engine(index, Settings.llm, top_k)
     elif retrieval_mode == 'fusion':

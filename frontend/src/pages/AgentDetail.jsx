@@ -70,7 +70,7 @@ const RAG_SECTIONS = [
       { id: 'xai',          label: 'XAI — Explainable RAG',   impl: true,  desc: 'After synthesis, verifies that each cited fragment exists verbatim in the retrieved chunks. Retries up to 2 times if hallucinations are detected. Produces a full traceability log.', incompat: [] },
       { id: 'kw_filter',    label: 'KeywordNodePostprocessor', impl: false, desc: 'Filters chunks that do not contain required keywords.',                  incompat: [] },
       { id: 'prev_next',    label: 'PrevNextNodePostprocessor',impl: false, desc: 'Expands each retrieved chunk with its neighbouring chunks for context.', incompat: [] },
-      { id: 'long_reorder', label: 'LongContextReorder',       impl: false, desc: 'Reorders chunks to place the most relevant at start and end of prompt.',incompat: [] },
+      { id: 'long_reorder', label: 'LongContextReorder',       impl: true,  desc: 'Reorders chunks to place the most relevant at start and end of prompt.',incompat: [] },
     ]
   },
   {
@@ -279,9 +279,10 @@ export default function AgentDetail() {
     const techs = initTechsFromMode(data.rag_config?.retrieval_mode ?? 'naive')
     const synthMode = data.rag_config?.synthesis_mode ?? 'compact'
     if (synthMode !== 'compact') { techs.delete('compact'); techs.add(synthMode) }
-    if (data.rag_config?.sim_filter) techs.add('sim_filter')
-    if (data.rag_config?.rerank)     techs.add('rerank_ce')
-    if (data.rag_config?.xai)        techs.add('xai')
+    if (data.rag_config?.sim_filter)   techs.add('sim_filter')
+    if (data.rag_config?.rerank)       techs.add('rerank_ce')
+    if (data.rag_config?.xai)          techs.add('xai')
+    if (data.rag_config?.long_reorder) techs.add('long_reorder')
     setSelectedTechs(techs)
     setConvMemory(data.rag_config?.conv_memory ?? false)
     setConvMemoryMode(data.rag_config?.conv_memory_mode ?? 'simple')
@@ -454,6 +455,7 @@ export default function AgentDetail() {
           rerank_top_n: Number(rerankTopN),
           fusion_num_queries: Number(fusionNumQueries),
           xai: selectedTechs.has('xai'),
+          long_reorder: selectedTechs.has('long_reorder'),
           conv_memory: convMemory,
           conv_memory_mode: convMemoryMode,
           conv_memory_turns: Number(convMemoryTurns)
