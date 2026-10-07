@@ -16,7 +16,7 @@ const RAG_SECTIONS = [
       { id: 'hyde_combined', label: 'HyDE Combined',        impl: true,  desc: 'Embeds both the original question and a hypothetical answer for retrieval.',               incompat: ['naive', 'hyde_answer',   'crag'] },
       { id: 'multi_query',   label: 'Multi-Query',          impl: false, desc: 'Generates N reformulations of the question and fuses all results to improve recall.',     incompat: [] },
       { id: 'step_back',     label: 'Step-back Prompting',  impl: false, desc: 'Abstracts the question to a higher-level concept before retrieving.',                     incompat: [] },
-      { id: 'sub_question',  label: 'Sub-question Engine',  impl: false, desc: 'Decomposes complex questions into sub-questions, each with its own retrieval.',           incompat: [] },
+      { id: 'sub_question',  label: 'Sub-question Engine',  impl: true,  desc: 'Decomposes complex questions into sub-questions, each with its own retrieval, then combines the partial answers.', incompat: ['hyde_answer', 'hyde_combined', 'crag', 'self_rag', 'router', 'fusion', 'raptor'] },
       { id: 'router',        label: 'Adaptive Router',       impl: true,  desc: 'Classifies the query type (factual, multi-hop, summary, out-of-domain) and routes it to the most suitable engine automatically.',        incompat: ['hyde_answer', 'hyde_combined', 'crag', 'self_rag'] },
     ]
   },
@@ -98,6 +98,7 @@ const MODE_TECHS = {
   router:        ['router',            'compact'],
   fusion:        ['fusion',            'compact'],
   raptor:        ['raptor',            'compact'],
+  sub_question:  ['sub_question',      'compact'],
 }
 
 const initTechsFromMode = (mode) => {
@@ -106,7 +107,7 @@ const initTechsFromMode = (mode) => {
   return t
 }
 
-const MODE_PRIORITY = ['crag', 'self_rag', 'router', 'raptor', 'fusion', 'hyde_combined', 'hyde_answer', 'naive']
+const MODE_PRIORITY = ['crag', 'self_rag', 'router', 'sub_question', 'raptor', 'fusion', 'hyde_combined', 'hyde_answer', 'naive']
 
 const computeRetrievalMode = (techs) =>
   MODE_PRIORITY.find(mode => techs.has(mode)) ?? 'naive'

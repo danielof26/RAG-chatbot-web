@@ -180,6 +180,30 @@ def _build_router_engine(index, llm, top_k: int):
     return RouterQueryEngine(selector=LLMSingleSelector.from_defaults(), query_engine_tools=tools, verbose=True)
 
 
+def _build_sub_question_engine(index, top_k: int):
+    """
+    Descompone la pregunta en sub-preguntas (vía LLMQuestionGenerator) y responde cada una
+    por separado contra el índice vectorial antes de combinar las respuestas parciales.
+    Misma construcción que la rama 'multihop' interna de _build_router_engine, pero aquí
+    se aplica siempre en lugar de dejar que el selector del router decida si usarla o no.
+    """
+    from llama_index.core.query_engine import SubQuestionQueryEngine
+    from llama_index.core.question_gen import LLMQuestionGenerator
+    from llama_index.core.tools import QueryEngineTool
+
+    base_engine = index.as_query_engine(similarity_top_k=top_k, response_mode='compact')
+    return SubQuestionQueryEngine.from_defaults(
+        query_engine_tools=[
+            QueryEngineTool.from_defaults(
+                query_engine=base_engine,
+                description="Useful for answering questions about the documents"
+            )
+        ],
+        question_gen=LLMQuestionGenerator.from_defaults(),
+        use_async=False
+    )
+
+
 def _build_raptor_engine(agent_id: str, chroma_collection, top_k: int, synthesis_mode: str):
     from llama_index.core.query_engine import RetrieverQueryEngine
     from llama_index.core import Document
@@ -290,6 +314,8 @@ def query_agent(agent_id: str, question: str, agent_config: dict, chat_history: 
         query_engine = _build_fusion_engine(index, chroma_collection, top_k, top_q)
     elif retrieval_mode == 'raptor':
         query_engine = _build_raptor_engine(agent_id, chroma_collection, top_k, synthesis_mode)
+    elif retrieval_mode == 'sub_question':
+        query_engine = _build_sub_question_engine(index, top_k)
     else:
         query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
                                              node_postprocessors=postprocessors)
@@ -350,11 +376,13 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict, chat_hi
         query_engine = _build_fusion_engine(index, chroma_collection, top_k, top_q)
     elif retrieval_mode == 'raptor':
         query_engine = _build_raptor_engine(agent_id, chroma_collection, top_k, synthesis_mode)
+    elif retrieval_mode == 'sub_question':
+        query_engine = _build_sub_question_engine(index, top_k)
     else:
         query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
                                              node_postprocessors=postprocessors, streaming=True)
     strategy = get_query_strategy(retrieval_mode)
-    if retrieval_mode in ('self_rag', 'router', 'fusion', 'raptor'):
+    if retrieval_mode in ('self_rag', 'router', 'fusion', 'raptor', 'sub_question'):
         answer, _ = strategy.execute(query_engine, effective_question, Settings.llm, synthesis_question=synthesis_question)
         for word in answer.split(' '):
             yield word + ' '

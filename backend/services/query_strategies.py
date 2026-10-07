@@ -157,6 +157,7 @@ _STRATEGIES = {
     'router':        NaiveStrategy,
     'fusion':        NaiveStrategy,
     'raptor':        NaiveStrategy,
+    'sub_question':  NaiveStrategy,
 }
 
 
