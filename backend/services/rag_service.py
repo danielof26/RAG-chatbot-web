@@ -239,20 +239,30 @@ def _build_raptor_engine(agent_id: str, chroma_collection, top_k: int, synthesis
 
 
 
-def _build_fusion_engine(index, chroma_collection, top_k: int, top_q: int):
-    from llama_index.core.retrievers import QueryFusionRetriever
+def _build_bm25_retriever(chroma_collection, top_k: int):
+    """Sparse/keyword retriever (term frequency, no embeddings) over the chunks already in ChromaDB."""
     from llama_index.retrievers.bm25 import BM25Retriever
     from llama_index.core.schema import TextNode
-    from llama_index.core.query_engine import RetrieverQueryEngine
-
-    vector_retriever = index.as_retriever(similarity_top_k=top_k)
 
     raw = chroma_collection.get(include=['documents', 'metadatas'])
     nodes = [
         TextNode(text=doc, metadata=meta or {})
         for doc, meta in zip(raw['documents'], raw['metadatas'])
     ]
-    bm25_retriever = BM25Retriever.from_defaults(nodes=nodes, similarity_top_k=top_k)
+    return BM25Retriever.from_defaults(nodes=nodes, similarity_top_k=top_k)
+
+
+def _build_bm25_engine(chroma_collection, top_k: int):
+    from llama_index.core.query_engine import RetrieverQueryEngine
+    return RetrieverQueryEngine.from_args(_build_bm25_retriever(chroma_collection, top_k))
+
+
+def _build_fusion_engine(index, chroma_collection, top_k: int, top_q: int):
+    from llama_index.core.retrievers import QueryFusionRetriever
+    from llama_index.core.query_engine import RetrieverQueryEngine
+
+    vector_retriever = index.as_retriever(similarity_top_k=top_k)
+    bm25_retriever = _build_bm25_retriever(chroma_collection, top_k)
 
     fusion_retriever = QueryFusionRetriever(
         [vector_retriever, bm25_retriever],
@@ -316,6 +326,8 @@ def query_agent(agent_id: str, question: str, agent_config: dict, chat_history: 
         query_engine = _build_raptor_engine(agent_id, chroma_collection, top_k, synthesis_mode)
     elif retrieval_mode == 'sub_question':
         query_engine = _build_sub_question_engine(index, top_k)
+    elif retrieval_mode == 'bm25':
+        query_engine = _build_bm25_engine(chroma_collection, top_k)
     else:
         query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
                                              node_postprocessors=postprocessors)
@@ -378,11 +390,13 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict, chat_hi
         query_engine = _build_raptor_engine(agent_id, chroma_collection, top_k, synthesis_mode)
     elif retrieval_mode == 'sub_question':
         query_engine = _build_sub_question_engine(index, top_k)
+    elif retrieval_mode == 'bm25':
+        query_engine = _build_bm25_engine(chroma_collection, top_k)
     else:
         query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
                                              node_postprocessors=postprocessors, streaming=True)
     strategy = get_query_strategy(retrieval_mode)
-    if retrieval_mode in ('self_rag', 'router', 'fusion', 'raptor', 'sub_question'):
+    if retrieval_mode in ('self_rag', 'router', 'fusion', 'raptor', 'sub_question', 'bm25'):
         answer, _ = strategy.execute(query_engine, effective_question, Settings.llm, synthesis_question=synthesis_question)
         for word in answer.split(' '):
             yield word + ' '

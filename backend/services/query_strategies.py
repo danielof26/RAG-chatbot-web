@@ -158,6 +158,7 @@ _STRATEGIES = {
     'fusion':        NaiveStrategy,
     'raptor':        NaiveStrategy,
     'sub_question':  NaiveStrategy,
+    'bm25':          NaiveStrategy,
 }
 
 

@@ -49,7 +49,7 @@ const RAG_SECTIONS = [
     desc: 'How relevant nodes are searched within the index. All combinable — Fusion is literally dense + sparse together.',
     techniques: [
       { id: 'vec_retriever',  label: 'Vector Store (dense)',    impl: true,  desc: 'Semantic similarity search using embeddings — the standard retriever.',     incompat: [] },
-      { id: 'bm25',           label: 'BM25 (sparse/keyword)',   impl: false, desc: 'Classic keyword retrieval — complements dense search for exact terms.',    incompat: [] },
+      { id: 'bm25',           label: 'BM25 (sparse/keyword)',   impl: true,  desc: 'Classic keyword retrieval — complements dense search for exact terms. Used alone here, with no embeddings involved.', incompat: ['fusion', 'router', 'sub_question', 'raptor', 'hyde_answer', 'hyde_combined'] },
       { id: 'auto_merging',   label: 'Auto-Merging',            impl: false, desc: 'Merges child chunks into parent when enough siblings are retrieved.',      incompat: [] },
       { id: 'recursive',      label: 'Recursive Retriever',     impl: false, desc: 'Follows references between nodes recursively to complete context.',       incompat: [] },
       { id: 'fusion',         label: 'Fusion (dense + sparse)', impl: true,  desc: 'Combines vector and BM25 retrievers with reciprocal rank fusion for hybrid retrieval.',  incompat: ['hyde_answer', 'hyde_combined', 'crag', 'self_rag', 'router', 'raptor'] },
@@ -99,6 +99,7 @@ const MODE_TECHS = {
   fusion:        ['fusion',            'compact'],
   raptor:        ['raptor',            'compact'],
   sub_question:  ['sub_question',      'compact'],
+  bm25:          ['bm25',              'compact'],
 }
 
 const initTechsFromMode = (mode) => {
@@ -107,7 +108,7 @@ const initTechsFromMode = (mode) => {
   return t
 }
 
-const MODE_PRIORITY = ['crag', 'self_rag', 'router', 'sub_question', 'raptor', 'fusion', 'hyde_combined', 'hyde_answer', 'naive']
+const MODE_PRIORITY = ['crag', 'self_rag', 'router', 'sub_question', 'raptor', 'fusion', 'bm25', 'hyde_combined', 'hyde_answer', 'naive']
 
 const computeRetrievalMode = (techs) =>
   MODE_PRIORITY.find(mode => techs.has(mode)) ?? 'naive'
