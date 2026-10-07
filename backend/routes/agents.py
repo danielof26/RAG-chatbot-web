@@ -327,8 +327,19 @@ def chat(agent_id):
     if not question:
         return jsonify({'error': 'Question is mandatory'}), 400
 
+    # Fetch conversation history for memory-aware retrieval
+    rag_config = agent.get('rag_config', {})
+    chat_history = None
+    if rag_config.get('conv_memory', False):
+        turns = int(rag_config.get('conv_memory_turns', 3))
+        recent = list(chat_messages_col.find(
+            {'agent_id': agent_id, 'user_id': request.user_id}
+        ).sort('created_at', -1).limit(turns * 2))
+        recent.reverse()
+        chat_history = [{'role': m['role'], 'content': m['content']} for m in recent]
+
     try:
-        answer = query_agent(agent_id, question, agent)
+        answer = query_agent(agent_id, question, agent, chat_history=chat_history)
     except Exception as e:
         return jsonify({'error': f'Error at processing the question: {str(e)}'}), 500
 

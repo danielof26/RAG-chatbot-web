@@ -10,6 +10,25 @@ from services.llm_providers import get_provider
 from services.query_strategies import get_query_strategy
 
 
+def _condense_question(question: str, chat_history: list, llm) -> str:
+    """Reformulates a follow-up question as a standalone question using chat history."""
+    if not chat_history:
+        return question
+    history_text = '\n'.join(
+        f"{'Human' if m['role'] == 'user' else 'Assistant'}: {m['content']}"
+        for m in chat_history
+    )
+    prompt = (
+        "Given the following conversation history and a follow-up question, "
+        "rephrase the follow-up question as a standalone question that captures "
+        "all necessary context.\n\n"
+        f"Chat History:\n{history_text}\n\n"
+        f"Follow-up Question: {question}\n\n"
+        "Standalone Question:"
+    )
+    return str(llm.complete(prompt)).strip()
+
+
 def _resolve_server(agent_config: dict):
     """Obtiene el servidor LLM configurado en el agente desde MongoDB, o None."""
     server_id = agent_config.get('llm_server_id')
@@ -222,7 +241,7 @@ def _build_fusion_engine(index, chroma_collection, top_k: int, top_q: int):
     return RetrieverQueryEngine.from_args(fusion_retriever)
 
 
-def query_agent(agent_id: str, question: str, agent_config: dict) -> str:
+def query_agent(agent_id: str, question: str, agent_config: dict, chat_history: list = None) -> str:
     """
     Hace una pregunta al RAG del agente y devuelve la respuesta.
     Si el agente no tiene documentos, avisa al usuario.
@@ -242,6 +261,23 @@ def query_agent(agent_id: str, question: str, agent_config: dict) -> str:
     similarity_cutoff  = rag_config.get('similarity_cutoff') if rag_config.get('sim_filter') else None
     rerank             = rag_config.get('rerank', False)
 
+    # Conversational memory: reformulate question or build synthesis context
+    effective_question = question
+    synthesis_question = None
+    if rag_config.get('conv_memory', False) and chat_history:
+        conv_mode = rag_config.get('conv_memory_mode', 'simple')
+        if conv_mode == 'condense':
+            effective_question = _condense_question(question, chat_history, Settings.llm)
+        else:  # simple: include history in synthesis prompt, keep original for retrieval
+            history_lines = '\n'.join(
+                f"{'Human' if m['role'] == 'user' else 'Assistant'}: {m['content']}"
+                for m in chat_history
+            )
+            synthesis_question = (
+                f"Conversation history:\n{history_lines}\n\n"
+                f"Current question: {question}"
+            )
+
     index = VectorStoreIndex.from_vector_store(vector_store, storage_context=storage_context)
     postprocessors = []
     if similarity_cutoff:
@@ -258,13 +294,13 @@ def query_agent(agent_id: str, question: str, agent_config: dict) -> str:
         query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
                                              node_postprocessors=postprocessors)
     strategy = get_query_strategy(retrieval_mode)
-    answer, _ = strategy.execute(query_engine, question, Settings.llm)
+    answer, _ = strategy.execute(query_engine, effective_question, Settings.llm, synthesis_question=synthesis_question)
     if not answer or not answer.strip():
         answer = "I could not find relevant information in the documents to answer this question."
     return answer
 
 
-def stream_query_agent(agent_id: str, question: str, agent_config: dict):
+def stream_query_agent(agent_id: str, question: str, agent_config: dict, chat_history: list = None):
     """
     Generador que cede tokens uno a uno para modo streaming.
     El caller itera sobre él para construir la respuesta progresivamente.
@@ -284,6 +320,24 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict):
     synthesis_mode     = rag_config.get('synthesis_mode', 'compact')
     similarity_cutoff  = rag_config.get('similarity_cutoff') if rag_config.get('sim_filter') else None
     rerank             = rag_config.get('rerank', False)
+
+    # Conversational memory
+    effective_question = question
+    synthesis_question = None
+    if rag_config.get('conv_memory', False) and chat_history:
+        conv_mode = rag_config.get('conv_memory_mode', 'simple')
+        if conv_mode == 'condense':
+            effective_question = _condense_question(question, chat_history, Settings.llm)
+        else:
+            history_lines = '\n'.join(
+                f"{'Human' if m['role'] == 'user' else 'Assistant'}: {m['content']}"
+                for m in chat_history
+            )
+            synthesis_question = (
+                f"Conversation history:\n{history_lines}\n\n"
+                f"Current question: {question}"
+            )
+
     index = VectorStoreIndex.from_vector_store(vector_store, storage_context=storage_context)
     postprocessors = []
     if similarity_cutoff:
@@ -301,11 +355,17 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict):
                                              node_postprocessors=postprocessors, streaming=True)
     strategy = get_query_strategy(retrieval_mode)
     if retrieval_mode in ('self_rag', 'router', 'fusion', 'raptor'):
-        answer, _ = strategy.execute(query_engine, question, Settings.llm)
+        answer, _ = strategy.execute(query_engine, effective_question, Settings.llm, synthesis_question=synthesis_question)
         for word in answer.split(' '):
             yield word + ' '
     else:
-        query = strategy.build_query(question, Settings.llm)
+        q = synthesis_question or effective_question
+        query = strategy.build_query(effective_question, Settings.llm)
+        from llama_index.core import QueryBundle
+        if isinstance(query, QueryBundle):
+            query = QueryBundle(query_str=q, custom_embedding_strs=query.custom_embedding_strs)
+        else:
+            query = q
         streaming_response = query_engine.query(query)
         for token in streaming_response.response_gen:
             yield token

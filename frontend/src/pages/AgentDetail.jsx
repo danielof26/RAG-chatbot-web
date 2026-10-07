@@ -166,6 +166,9 @@ export default function AgentDetail() {
   const [selectedTechs, setSelectedTechs] = useState(() => initTechsFromMode('naive'))
   const [savingAdvanced, setSavingAdvanced] = useState(false)
   const [advancedSaveMsg, setAdvancedSaveMsg] = useState('')
+  const [convMemory, setConvMemory] = useState(false)
+  const [convMemoryMode, setConvMemoryMode] = useState('simple')
+  const [convMemoryTurns, setConvMemoryTurns] = useState(3)
 
   // Documents
   const [uploading, setUploading] = useState(false)
@@ -278,6 +281,9 @@ export default function AgentDetail() {
     if (data.rag_config?.rerank)     techs.add('rerank_ce')
     if (data.rag_config?.xai)        techs.add('xai')
     setSelectedTechs(techs)
+    setConvMemory(data.rag_config?.conv_memory ?? false)
+    setConvMemoryMode(data.rag_config?.conv_memory_mode ?? 'simple')
+    setConvMemoryTurns(data.rag_config?.conv_memory_turns ?? 3)
     setLoading(false)
   }
 
@@ -445,7 +451,10 @@ export default function AgentDetail() {
           rerank: selectedTechs.has('rerank_ce'),
           rerank_top_n: Number(rerankTopN),
           fusion_num_queries: Number(fusionNumQueries),
-          xai: selectedTechs.has('xai')
+          xai: selectedTechs.has('xai'),
+          conv_memory: convMemory,
+          conv_memory_mode: convMemoryMode,
+          conv_memory_turns: Number(convMemoryTurns)
         }
       })
     })
@@ -1259,6 +1268,72 @@ export default function AgentDetail() {
 
               </div>
             ))}
+
+            {/* Conversational Memory */}
+            <div className="border border-gray-100 rounded-xl px-5 py-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="flex items-center justify-center w-5 h-5 rounded-full bg-orange-50 text-orange-400 text-[10px] font-bold shrink-0">7</span>
+                <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Conversational Memory</p>
+              </div>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                Maintains context across turns so follow-up questions are resolved correctly.
+                Simple mode prepends the conversation history to the prompt.
+                Condense mode uses the LLM to reformulate the follow-up into a standalone question before retrieval.
+              </p>
+
+              {/* Enable toggle */}
+              <div className="flex items-center gap-3">
+                <input
+                  id="conv-memory-toggle"
+                  type="checkbox"
+                  checked={convMemory}
+                  onChange={e => setConvMemory(e.target.checked)}
+                  className="w-4 h-4 accent-orange-400"
+                />
+                <label htmlFor="conv-memory-toggle" className="text-sm text-gray-600">Enable conversational memory</label>
+              </div>
+
+              {convMemory && (
+                <div className="space-y-3 pt-1 border-t border-gray-50">
+                  {/* Mode selector */}
+                  <div className="mt-3">
+                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Mode</p>
+                    <div className="flex gap-2">
+                      {[
+                        { id: 'simple',  label: 'Simple',  desc: 'Prepends history to the synthesis prompt. No extra LLM call.' },
+                        { id: 'condense', label: 'Condense', desc: 'Reformulates the follow-up into a standalone question before retrieval.' },
+                      ].map(opt => (
+                        <button
+                          key={opt.id}
+                          title={opt.desc}
+                          onClick={() => setConvMemoryMode(opt.id)}
+                          className={`px-4 py-2 rounded-full text-xs font-medium border transition-colors ${
+                            convMemoryMode === opt.id
+                              ? 'bg-orange-400 text-white border-orange-400'
+                              : 'bg-white text-gray-600 border-gray-200 hover:border-orange-300 hover:text-orange-500'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Turns input */}
+                  <div>
+                    <label htmlFor="conv-memory-turns" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Turns to remember</label>
+                    <input
+                      id="conv-memory-turns"
+                      type="number" min="1" max="10"
+                      value={convMemoryTurns}
+                      onChange={e => setConvMemoryTurns(e.target.value)}
+                      className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">Number of previous exchanges included as context (1–10).</p>
+                  </div>
+                </div>
+              )}
+            </div>
 
             <div className="flex items-center justify-end gap-3 pt-2">
               {advancedSaveMsg && <span className="text-sm text-gray-400">{advancedSaveMsg}</span>}
