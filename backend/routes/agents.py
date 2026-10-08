@@ -5,13 +5,16 @@ import os
 import threading
 import traceback
 from db import agents_col, chat_messages_col
-from services.rag_config import RagConfig
+from request_utils import json_object, public_error_message, str_field
+from services.agent_cleanup import delete_agent_cascade
+from services.rag_config import RagConfig, validate_rag_config
+from upload_policy import is_allowed_document
 from middleware.agent_middleware import AGENT_NOT_FOUND, INVALID_ID, with_agent, with_public_agent
 from middleware.auth_middleware import token_required, api_key_error
 from serializers import isoformat_fields, serialize_doc
 from services.job_state import claim_document_for_indexing, set_document_status
 from states import DocumentStatus
-from services.rag_service import index_document, query_agent, delete_agent_collection, delete_document_vectors
+from services.rag_service import index_document, query_agent, delete_document_vectors
 import config
 
 agents_bp = Blueprint('agents', __name__)
@@ -23,6 +26,8 @@ BODY_REQUIRED   = 'Body JSON required'
 def _index_in_background(agent_id, file_path, embed_model, embed_server_id, rag_config, filename):
     try:
         set_document_status(agent_id, filename, DocumentStatus.INDEXING)
+        # A previous attempt may have failed halfway with some chunks already stored: start from a clean slate
+        delete_document_vectors(agent_id, file_path)
         index_document(
             agent_id, file_path,
             embed_model=embed_model,
@@ -49,11 +54,11 @@ def _serialize(agent):
 @agents_bp.route('/api/agents', methods=['POST'])
 @token_required
 def create_agent():
-    data = request.get_json()
+    data = json_object()
     if not data:
         return jsonify({'error': BODY_REQUIRED}), 400
 
-    name = data.get('name', '').strip()
+    name = str_field(data, 'name')
     if not name:
         return jsonify({'error': 'You must assign a name to the agent'}), 400
 
@@ -97,7 +102,7 @@ def get_agent(agent_id, agent):
 @agents_bp.route('/api/agents/<agent_id>', methods=['PUT'])
 @token_required
 def update_agent(agent_id):
-    data = request.get_json()
+    data = json_object()
     if not data:
         return jsonify({'error': BODY_REQUIRED}), 400
 
@@ -106,6 +111,11 @@ def update_agent(agent_id):
 
     if not updates:
         return jsonify({'error': 'Nothing to update'}), 400
+
+    if 'rag_config' in updates:
+        error = validate_rag_config(updates['rag_config'])
+        if error:
+            return jsonify({'error': error}), 400
 
     updates['updated_at'] = datetime.now(timezone.utc)
 
@@ -128,8 +138,7 @@ def update_agent(agent_id):
 @token_required
 @with_agent
 def delete_agent(agent_id, agent):
-    delete_agent_collection(agent_id)
-    agents_col.delete_one({'_id': ObjectId(agent_id)})
+    delete_agent_cascade(agent_id)
     return jsonify({'message': 'Agent deleted'}), 200
 
 
@@ -147,6 +156,10 @@ def upload_document(agent_id, agent):
     filename = os.path.basename(file.filename.replace('\\', '/')) if file.filename else ''
     if filename in ('', '.', '..'):
         return jsonify({'error': 'Document name is empty'}), 400
+    if not is_allowed_document(filename):
+        return jsonify({'error': 'Unsupported file type. Allowed: PDF, TXT, MD, DOCX, CSV'}), 400
+    if any(d['filename'] == filename for d in agent.get('documents', [])):
+        return jsonify({'error': f'A document named "{filename}" already exists. Delete it first or rename the file.'}), 409
 
     # Guardar archivo en disco
     agent_folder = os.path.join(config.UPLOADS_PATH, agent_id)
@@ -257,11 +270,11 @@ def _save_message(agent_id, user_id, role, content):
 @token_required
 @with_agent
 def chat(agent_id, agent):
-    data = request.get_json()
+    data = json_object()
     if not data:
         return jsonify({'error': BODY_REQUIRED}), 400
 
-    question = data.get('question', '').strip()
+    question = str_field(data, 'question')
     if not question:
         return jsonify({'error': 'Question is mandatory'}), 400
 
@@ -279,7 +292,7 @@ def chat(agent_id, agent):
     try:
         answer = query_agent(agent_id, question, agent, chat_history=chat_history)
     except Exception as e:
-        return jsonify({'error': f'Error at processing the question: {str(e)}'}), 500
+        return jsonify({'error': f'Error at processing the question: {public_error_message(e)}'}), 500
 
     _save_message(agent_id, request.user_id, 'user', question)
     _save_message(agent_id, request.user_id, 'assistant', answer)
@@ -318,17 +331,17 @@ def public_chat(agent_id, agent):
     if error:
         return error
 
-    data = request.get_json()
+    data = json_object()
     if not data:
         return jsonify({'error': BODY_REQUIRED}), 400
 
-    question = data.get('question', '').strip()
+    question = str_field(data, 'question')
     if not question:
         return jsonify({'error': 'Question is mandatory'}), 400
 
     try:
         answer = query_agent(agent_id, question, agent)
     except Exception as e:
-        return jsonify({'error': f'Error at processing the question: {str(e)}'}), 500
+        return jsonify({'error': f'Error at processing the question: {public_error_message(e)}'}), 500
 
     return jsonify({'answer': answer}), 200

@@ -1,7 +1,7 @@
 # backend/app.py
 import os
 import sys
-from flask import Flask, send_from_directory
+from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 from routes.auth import auth_bp
 from routes.agents import agents_bp
@@ -14,12 +14,19 @@ from routes.evaluations import evaluations_bp
 from routes.rag_catalog import rag_catalog_bp
 from services.job_state import recover_interrupted_jobs
 from services.secret_migration import migrate_plaintext_secrets
+from upload_policy import MAX_REQUEST_BYTES
 
 FRONTEND_DIST = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'dist')
 
 # static_folder=None: the built-in static route would shadow serve_react and 404 on reloads of SPA routes
 app = Flask(__name__, static_folder=None)
+app.config['MAX_CONTENT_LENGTH'] = MAX_REQUEST_BYTES
 CORS(app)
+
+
+@app.errorhandler(413)
+def request_too_large(_):
+    return jsonify({'error': f'The upload is too large (maximum {MAX_REQUEST_BYTES // (1024 * 1024)} MB)'}), 413
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(agents_bp)
