@@ -5,6 +5,7 @@ export default function ApiTab({ id, api, active, apiKeyRequired, setApiKeyRequi
   const [newKeyName, setNewKeyName] = useState('')
   const [createdKey, setCreatedKey] = useState(null)
   const [savingApi, setSavingApi] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   const fetchApiKeys = async () => {
     const res = await api.get(`/api/agents/${id}/api-keys`)
@@ -16,8 +17,19 @@ export default function ApiTab({ id, api, active, apiKeyRequired, setApiKeyRequi
     if (!res.ok) return
     const created = await res.json()
     setCreatedKey(created)
+    setCopied(false)
     setNewKeyName('')
     await fetchApiKeys()
+  }
+
+  const handleCopyKey = async () => {
+    try {
+      await navigator.clipboard.writeText(createdKey.key)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Sin permiso de portapapeles (p. ej. HTTP no seguro): el usuario aún puede seleccionarla a mano
+    }
   }
 
   const handleDeleteKey = async (keyId) => {
@@ -136,8 +148,22 @@ export default function ApiTab({ id, api, active, apiKeyRequired, setApiKeyRequi
         {createdKey && (
           <div className="mb-4 bg-green-50 border border-green-200 rounded-xl px-4 py-3">
             <p className="text-xs font-medium text-green-700 mb-1">Key created — copy it now, it won't be shown again:</p>
-            <p className="font-mono text-xs text-green-800 break-all">{createdKey.key}</p>
-            <button onClick={() => setCreatedKey(null)} className="text-xs text-green-600 hover:text-green-700 mt-2">Dismiss</button>
+            <div className="flex items-center justify-between gap-3">
+              <p className="font-mono text-xs text-green-800 break-all">{createdKey.key}</p>
+              <button
+                onClick={handleCopyKey}
+                title={copied ? 'Copied!' : 'Copy to clipboard'}
+                aria-label="Copy API key"
+                className="shrink-0 text-green-600 hover:text-green-800 transition"
+              >
+                {copied ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M20 6 9 17l-5-5" /></svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+                )}
+              </button>
+            </div>
+            <button onClick={() => { setCreatedKey(null); setCopied(false) }} className="text-xs text-green-600 hover:text-green-700 mt-2">Dismiss</button>
           </div>
         )}
 
