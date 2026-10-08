@@ -1,6 +1,6 @@
 // src/pages/AgentDetail.jsx
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useApi } from '../api/useApi'
 import SettingsTab from './agent/SettingsTab'
 import DocumentsTab from './agent/DocumentsTab'
@@ -15,10 +15,14 @@ export default function AgentDetail() {
   const { id } = useParams()
   const api = useApi()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // The active tab lives in the URL (?tab=chat) so a reload keeps it; an unknown value falls back to Settings.
+  const activeTab = TABS.find(t => t.toLowerCase() === searchParams.get('tab')) || TABS[0]
+  const setActiveTab = (tab) => setSearchParams({ tab: tab.toLowerCase() }, { replace: true })
 
   const [agent, setAgent] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('Settings')
   const [llmServers, setLlmServers] = useState([])
   const [apiKeyRequired, setApiKeyRequired] = useState(false)
   const [catalog, setCatalog] = useState(null)
