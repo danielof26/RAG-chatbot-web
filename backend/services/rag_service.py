@@ -381,12 +381,26 @@ class EngineContext:
     streaming: bool = False
 
 
+RERANK_MODEL = 'cross-encoder/ms-marco-MiniLM-L-6-v2'
+_reranker_base = None
+_reranker_lock = threading.Lock()
+
+
+def _get_reranker(top_n):
+    """The cross-encoder is loaded once; each call gets a cheap copy that shares it but has its own top_n."""
+    global _reranker_base
+    with _reranker_lock:
+        if _reranker_base is None:
+            _reranker_base = SentenceTransformerRerank(model=RERANK_MODEL, top_n=top_n)
+    return _reranker_base.model_copy(update={'top_n': top_n})
+
+
 def build_postprocessors(similarity_cutoff=None, rerank=False, rerank_top_n=3, long_reorder=False) -> list:
     postprocessors = []
     if similarity_cutoff:
         postprocessors.append(SimilarityPostprocessor(similarity_cutoff=similarity_cutoff))
     if rerank:
-        postprocessors.append(SentenceTransformerRerank(model='cross-encoder/ms-marco-MiniLM-L-6-v2', top_n=rerank_top_n))
+        postprocessors.append(_get_reranker(rerank_top_n))
     if long_reorder:
         postprocessors.append(LongContextReorder())
     return postprocessors
