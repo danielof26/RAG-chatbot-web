@@ -14,6 +14,7 @@ from db import agents_col, config_snapshots_col, evaluation_runs_col, llm_server
 from services.rag_config import RagConfig
 from services.llm_providers import OllamaProvider, get_provider
 from services.rag_engine import run_rag, setup_rag
+from services.rag_service import invalidate_bm25_cache
 
 _NLP_MODELS = {
     'es': 'es_core_news_sm',
@@ -248,6 +249,7 @@ def _cleanup_eval_collection(run_id: str):
         client = chromadb.PersistentClient(path=config.CHROMA_PATH)
     except Exception:
         return
+    invalidate_bm25_cache(f'eval_{run_id}')
     for name in (f'eval_{run_id}', f'eval_{run_id}_raptor'):
         try:
             client.delete_collection(name)

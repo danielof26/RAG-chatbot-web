@@ -5,6 +5,8 @@ from llama_index.core.postprocessor import SimilarityPostprocessor
 from llama_index.core.postprocessor import SentenceTransformerRerank
 from llama_index.core.postprocessor import LongContextReorder
 from llama_index.llms.ollama import Ollama
+import copy
+import threading
 from dataclasses import dataclass, field
 import chromadb
 from llama_index.vector_stores.chroma import ChromaVectorStore
@@ -133,12 +135,15 @@ def index_document(agent_id: str, file_path: str, embed_model: str = None, embed
         chunk_size=chunk_size or 512,
         chunk_overlap=chunk_overlap or 50
     )
-    VectorStoreIndex.from_documents(
-        documents,
-        storage_context=storage_context,
-        transformations=[splitter],
-        embed_model=models.embed_model
-    )
+    try:
+        VectorStoreIndex.from_documents(
+            documents,
+            storage_context=storage_context,
+            transformations=[splitter],
+            embed_model=models.embed_model
+        )
+    finally:
+        invalidate_derived_indexes(agent_id)
 
 
 def _build_router_engine(index, llm, top_k: int, node_postprocessors=None):
@@ -284,8 +289,15 @@ def _build_raptor_engine(collection_key: str, chroma_collection, llm, embed_mode
 
 
 
-def _build_bm25_retriever(chroma_collection, top_k: int):
-    """Sparse/keyword retriever (term frequency, no embeddings) over the chunks already in ChromaDB."""
+# Building the BM25 index tokenizes every chunk of the collection, so it is cached per collection and
+# reused across requests. An entry is valid while the collection keeps the same number of chunks, and
+# is dropped explicitly whenever documents are added or removed (invalidate_derived_indexes).
+_BM25_CACHE_MAX = 32
+_bm25_cache = {}      # collection name -> (chunk count, BM25Retriever)
+_bm25_lock = threading.Lock()
+
+
+def _build_bm25_base(chroma_collection):
     from llama_index.retrievers.bm25 import BM25Retriever
     from llama_index.core.schema import TextNode
 
@@ -294,7 +306,39 @@ def _build_bm25_retriever(chroma_collection, top_k: int):
         TextNode(text=doc, metadata=_clean_chroma_metadata(meta))
         for doc, meta in zip(raw['documents'], raw['metadatas'])
     ]
-    return BM25Retriever.from_defaults(nodes=nodes, similarity_top_k=top_k)
+    return BM25Retriever.from_defaults(nodes=nodes, similarity_top_k=max(len(nodes), 1))
+
+
+def _build_bm25_retriever(chroma_collection, top_k: int):
+    """Sparse/keyword retriever (term frequency, no embeddings) over the chunks already in ChromaDB."""
+    name, count = chroma_collection.name, chroma_collection.count()
+    with _bm25_lock:
+        cached = _bm25_cache.get(name)
+        if cached is None or cached[0] != count:
+            _bm25_cache.pop(name, None)
+            if len(_bm25_cache) >= _BM25_CACHE_MAX:
+                _bm25_cache.pop(next(iter(_bm25_cache)))
+            cached = (count, _build_bm25_base(chroma_collection))
+            _bm25_cache[name] = cached
+    # Per-request shallow copy: shares the (read-only) index but has its own top_k.
+    retriever = copy.copy(cached[1])
+    retriever.similarity_top_k = max(1, min(top_k, int(retriever.bm25.scores['num_docs'])))
+    return retriever
+
+
+def invalidate_bm25_cache(collection_name: str):
+    with _bm25_lock:
+        _bm25_cache.pop(collection_name, None)
+
+
+def invalidate_derived_indexes(agent_id: str):
+    """Drops what is derived from the agent's chunks (BM25 index, RAPTOR tree) after its documents change.
+    Both are rebuilt lazily by the next query that needs them."""
+    invalidate_bm25_cache(f"agent_{agent_id}")
+    try:
+        chromadb.PersistentClient(path=config.CHROMA_PATH).delete_collection(f"agent_{agent_id}_raptor")
+    except Exception:
+        pass
 
 
 def _build_bm25_engine(chroma_collection, llm, top_k: int, node_postprocessors=None):
@@ -523,6 +567,7 @@ def delete_document_vectors(agent_id: str, file_path: str):
         chroma_collection.delete(where={'file_path': file_path})
     except Exception:
         pass
+    invalidate_derived_indexes(agent_id)
 
 
 def delete_agent_collection(agent_id: str):
@@ -535,3 +580,4 @@ def delete_agent_collection(agent_id: str):
             db.delete_collection(name)
         except Exception:
             pass
+    invalidate_bm25_cache(f"agent_{agent_id}")
