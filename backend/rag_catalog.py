@@ -4,6 +4,12 @@ Single source of truth for the UI: which techniques exist, whether they are impl
 cannot be combined. Declare each incompatibility on one side only; get_catalog() makes the lists symmetric.
 `impl` must be True only for techniques the backend can run (see _register_engine in rag_service.py and
 query_strategies.py).
+
+Rules the incompatibilities encode (tests/test_catalog.py enforces them):
+- The retrieval techniques in MODE_PRIORITY collapse into ONE retrieval_mode when saved, so any two of them
+  (naive aside, which is a no-op) must be locked against each other; otherwise one would be dropped silently.
+- CRAG and the Router build their own synthesis, so they ignore the chosen synthesis mode: lock the others.
+- The similarity filter compares against 0-1 cosine scores; Fusion (RRF, ~0.016) and BM25 use other scales.
 """
 import copy
 
@@ -11,7 +17,7 @@ SECTIONS = [
     {
         'id': 'pre', 'num': 1,
         'title': 'Pre-retrieval · Query transformation',
-        'desc': 'Applied before the retriever to improve semantic matching. All combinable with each other. The Router is exclusive in index selection but can coexist with the rest.',
+        'desc': 'Applied before the retriever to improve semantic matching. Techniques that cannot run together are locked (🔒).',
         'techniques': [
             {'id': 'naive', 'label': 'Naive (direct)', 'impl': True, 'incompat': ['hyde_answer', 'hyde_combined'],
              'desc': 'Uses the question as-is for retrieval. No transformation applied — the baseline. Compatible with CRAG (which also retrieves naively, then filters).'},
@@ -25,8 +31,8 @@ SECTIONS = [
              'desc': 'Abstracts the question to a higher-level concept before retrieving.'},
             {'id': 'sub_question', 'label': 'Sub-question Engine', 'impl': True, 'incompat': ['hyde_answer', 'hyde_combined', 'crag', 'self_rag', 'router', 'fusion', 'raptor'],
              'desc': 'Decomposes complex questions into sub-questions, each with its own retrieval, then combines the partial answers.'},
-            {'id': 'router', 'label': 'Adaptive Router', 'impl': True, 'incompat': ['hyde_answer', 'hyde_combined', 'crag', 'self_rag'],
-             'desc': 'Classifies the query type (factual, multi-hop, summary, out-of-domain) and routes it to the most suitable engine automatically.'},
+            {'id': 'router', 'label': 'Adaptive Router', 'impl': True, 'incompat': ['hyde_answer', 'hyde_combined', 'crag', 'self_rag', 'refine', 'tree_summarize', 'simple_summarize', 'accumulate'],
+             'desc': 'Classifies the query type (factual, multi-hop, summary, out-of-domain) and routes it to the most suitable engine automatically. Each route has its own synthesis, so the synthesis mode does not apply.'},
         ],
     },
     {
@@ -64,7 +70,7 @@ SECTIONS = [
     {
         'id': 'ret', 'num': 4,
         'title': 'Retrieval · Retriever strategy',
-        'desc': 'How relevant nodes are searched within the index. All combinable — Fusion is literally dense + sparse together.',
+        'desc': 'How relevant nodes are searched within the index. Only one search strategy runs per question, so Fusion, BM25 and RAPTOR exclude each other and the pre-retrieval engines.',
         'techniques': [
             {'id': 'vec_retriever', 'label': 'Vector Store (dense)', 'impl': True, 'incompat': [],
              'desc': 'Semantic similarity search using embeddings — the standard retriever.'},
@@ -87,18 +93,18 @@ SECTIONS = [
         'title': 'Post-retrieval · Filtering & reranking',
         'desc': 'Applied after retrieval to improve chunk quality. Most are combinable in pipeline — except the two reranking methods, choose one.',
         'techniques': [
-            {'id': 'crag', 'label': 'CRAG — Corrective RAG', 'impl': True, 'incompat': ['rerank_ce', 'rerank_llm', 'hyde_answer', 'hyde_combined'],
-             'desc': 'LLM grades each chunk as relevant/ambiguous/irrelevant and filters the irrelevant ones.'},
-            {'id': 'self_rag', 'label': 'Self-RAG', 'impl': True, 'incompat': [],
+            {'id': 'crag', 'label': 'CRAG — Corrective RAG', 'impl': True, 'incompat': ['hyde_answer', 'hyde_combined', 'self_rag', 'raptor', 'bm25', 'refine', 'tree_summarize', 'simple_summarize', 'accumulate'],
+             'desc': 'LLM grades each chunk as relevant/ambiguous/irrelevant and filters the irrelevant ones. Writes its own final prompt, so the synthesis mode does not apply. Combines with reranking: fewer chunks to grade.'},
+            {'id': 'self_rag', 'label': 'Self-RAG', 'impl': True, 'incompat': ['raptor', 'bm25', 'hyde_answer', 'hyde_combined'],
              'desc': 'After generating, the LLM evaluates its own answer (PASS/FAIL). If FAIL, retries with chunks embedded directly in the prompt.'},
-            {'id': 'rerank_ce', 'label': 'Reranking (cross-encoder)', 'impl': True, 'incompat': ['crag', 'rerank_llm'],
+            {'id': 'rerank_ce', 'label': 'Reranking (cross-encoder)', 'impl': True, 'incompat': ['rerank_llm'],
              'desc': 'Reranks chunks using a sentence-transformer cross-encoder model.'},
-            {'id': 'rerank_llm', 'label': 'Reranking (LLM)', 'impl': False, 'incompat': ['crag', 'rerank_ce'],
+            {'id': 'rerank_llm', 'label': 'Reranking (LLM)', 'impl': False, 'incompat': ['rerank_ce'],
              'desc': 'Reranks chunks by asking the LLM to score each one for relevance.'},
-            {'id': 'sim_filter', 'label': 'SimilarityPostprocessor', 'impl': True, 'incompat': [],
-             'desc': 'Discards chunks whose similarity score is below a set threshold.'},
+            {'id': 'sim_filter', 'label': 'SimilarityPostprocessor', 'impl': True, 'incompat': ['fusion', 'bm25'],
+             'desc': 'Discards chunks whose similarity score is below a set threshold. Needs cosine scores (0-1): Fusion and BM25 score on other scales, so they are locked.'},
             {'id': 'xai', 'label': 'XAI — Explainable RAG', 'impl': True, 'incompat': [],
-             'desc': 'After synthesis, verifies that each cited fragment exists verbatim in the retrieved chunks. Retries up to 2 times if hallucinations are detected. Produces a full traceability log.'},
+             'desc': 'After synthesis, verifies that each cited fragment exists verbatim in the retrieved chunks. Retries up to 2 times if hallucinations are detected. Produces a full traceability log. Applies to evaluations only, not to the chat.'},
             {'id': 'kw_filter', 'label': 'KeywordNodePostprocessor', 'impl': False, 'incompat': [],
              'desc': 'Filters chunks that do not contain required keywords.'},
             {'id': 'prev_next', 'label': 'PrevNextNodePostprocessor', 'impl': False, 'incompat': [],
