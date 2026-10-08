@@ -3,6 +3,7 @@ from bson import ObjectId
 from datetime import datetime, timezone
 from db import llm_servers_col
 from middleware.auth_middleware import token_required
+from serializers import serialize_doc
 from services.llm_providers import get_provider, PROVIDERS
 
 llm_servers_bp = Blueprint('llm_servers', __name__)
@@ -12,9 +13,7 @@ INVALID_ID = 'Invalid server ID'
 
 
 def _serialize(server):
-    server['_id'] = str(server['_id'])
-    if 'created_at' in server and isinstance(server['created_at'], datetime):
-        server['created_at'] = server['created_at'].isoformat()
+    serialize_doc(server)
     if 'api_key' in server:
         key = server['api_key']
         server['api_key'] = key[:8] + '...' if len(key) > 8 else '...'

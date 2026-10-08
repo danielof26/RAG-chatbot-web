@@ -4,15 +4,14 @@ from datetime import datetime, timezone
 from bson import ObjectId
 from flask import Blueprint, request, jsonify
 
-from db import agents_col, config_snapshots_col, evaluation_runs_col
+from db import config_snapshots_col, evaluation_runs_col
+from middleware.agent_middleware import INVALID_ID, with_agent
 from middleware.auth_middleware import token_required
 from services.rag_config import RagConfig
 from services.evaluation_service import parse_questions_csv, run_evaluation
 
 evaluations_bp = Blueprint('evaluations', __name__)
 
-AGENT_NOT_FOUND    = 'Agent not found'
-INVALID_ID         = 'Invalid ID'
 SNAPSHOT_NOT_FOUND = 'Configuration snapshot not found'
 RUN_NOT_FOUND       = 'Evaluation run not found'
 
@@ -45,15 +44,8 @@ def _serialize_detail(run):
 
 @evaluations_bp.route('/api/agents/<agent_id>/evaluations', methods=['GET'])
 @token_required
-def list_evaluations(agent_id):
-    try:
-        agent = agents_col.find_one({'_id': ObjectId(agent_id), 'user_id': request.user_id})
-    except Exception:
-        return jsonify({'error': INVALID_ID}), 400
-
-    if not agent:
-        return jsonify({'error': AGENT_NOT_FOUND}), 404
-
+@with_agent
+def list_evaluations(agent_id, agent):
     runs = list(evaluation_runs_col.find(
         {'agent_id': agent_id, 'user_id': request.user_id}
     ).sort('created_at', -1))
@@ -95,15 +87,8 @@ def delete_evaluation(agent_id, run_id):
 
 @evaluations_bp.route('/api/agents/<agent_id>/evaluations', methods=['POST'])
 @token_required
-def create_evaluation(agent_id):
-    try:
-        agent = agents_col.find_one({'_id': ObjectId(agent_id), 'user_id': request.user_id})
-    except Exception:
-        return jsonify({'error': INVALID_ID}), 400
-
-    if not agent:
-        return jsonify({'error': AGENT_NOT_FOUND}), 404
-
+@with_agent
+def create_evaluation(agent_id, agent):
     snapshot_id = request.form.get('snapshot_id', '').strip()
     try:
         snapshot = config_snapshots_col.find_one({

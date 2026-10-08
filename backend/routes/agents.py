@@ -6,7 +6,9 @@ import threading
 import traceback
 from db import agents_col, chat_messages_col
 from services.rag_config import RagConfig
+from middleware.agent_middleware import AGENT_NOT_FOUND, INVALID_ID, with_agent, with_public_agent
 from middleware.auth_middleware import token_required, api_key_error
+from serializers import isoformat_fields, serialize_doc
 from services.rag_service import index_document, query_agent, delete_agent_collection, delete_document_vectors
 import config
 
@@ -14,8 +16,6 @@ agents_bp = Blueprint('agents', __name__)
 
 DOC_FILENAME    = 'documents.filename'
 DOC_STATUS      = 'documents.$.status'
-INVALID_ID      = 'Invalid ID agent'
-AGENT_NOT_FOUND = 'Agent not found'
 BODY_REQUIRED   = 'Body JSON required'
 
 
@@ -46,14 +46,9 @@ def _index_in_background(agent_id, file_path, embed_model, embed_server_id, rag_
 
 def _serialize(agent):
     """Convierte los tipos de MongoDB a tipos serializables en JSON."""
-    agent['_id'] = str(agent['_id'])
-    for field in ['created_at', 'updated_at']:
-        if field in agent and isinstance(agent[field], datetime):
-            agent[field] = agent[field].isoformat()
-    if 'documents' in agent:
-        for doc in agent['documents']:
-            if 'uploaded_at' in doc and isinstance(doc['uploaded_at'], datetime):
-                doc['uploaded_at'] = doc['uploaded_at'].isoformat()
+    serialize_doc(agent, ('created_at', 'updated_at'))
+    for doc in agent.get('documents', []):
+        isoformat_fields(doc, ('uploaded_at',))
     return agent
 
 
@@ -102,14 +97,8 @@ def get_agents():
 
 @agents_bp.route('/api/agents/<agent_id>', methods=['GET'])
 @token_required
-def get_agent(agent_id):
-    try:
-        agent = agents_col.find_one({'_id': ObjectId(agent_id), 'user_id': request.user_id})
-    except Exception:
-        return jsonify({'error': INVALID_ID}), 400
-
-    if not agent:
-        return jsonify({'error': AGENT_NOT_FOUND}), 404
+@with_agent
+def get_agent(agent_id, agent):
     return jsonify(_serialize(agent)), 200
 
 
@@ -145,15 +134,8 @@ def update_agent(agent_id):
 
 @agents_bp.route('/api/agents/<agent_id>', methods=['DELETE'])
 @token_required
-def delete_agent(agent_id):
-    try:
-        agent = agents_col.find_one({'_id': ObjectId(agent_id), 'user_id': request.user_id})
-    except Exception:
-        return jsonify({'error': INVALID_ID}), 400
-
-    if not agent:
-        return jsonify({'error': AGENT_NOT_FOUND}), 404
-
+@with_agent
+def delete_agent(agent_id, agent):
     delete_agent_collection(agent_id)
     agents_col.delete_one({'_id': ObjectId(agent_id)})
     return jsonify({'message': 'Agent deleted'}), 200
@@ -163,15 +145,8 @@ def delete_agent(agent_id):
 
 @agents_bp.route('/api/agents/<agent_id>/documents', methods=['POST'])
 @token_required
-def upload_document(agent_id):
-    try:
-        agent = agents_col.find_one({'_id': ObjectId(agent_id), 'user_id': request.user_id})
-    except Exception:
-        return jsonify({'error': INVALID_ID}), 400
-
-    if not agent:
-        return jsonify({'error': AGENT_NOT_FOUND}), 404
-
+@with_agent
+def upload_document(agent_id, agent):
     if 'file' not in request.files:
         return jsonify({'error': 'No document has been uploaded'}), 400
 
@@ -214,37 +189,19 @@ def upload_document(agent_id):
 
 @agents_bp.route('/api/agents/<agent_id>/documents', methods=['GET'])
 @token_required
-def get_documents(agent_id):
-    try:
-        agent = agents_col.find_one(
-            {'_id': ObjectId(agent_id), 'user_id': request.user_id},
-            {'documents': 1}
-        )
-    except Exception:
-        return jsonify({'error': INVALID_ID}), 400
-
-    if not agent:
-        return jsonify({'error': AGENT_NOT_FOUND}), 404
-
+@with_agent
+def get_documents(agent_id, agent):
     documents = agent.get('documents', [])
     for doc in documents:
-        if 'uploaded_at' in doc and isinstance(doc['uploaded_at'], datetime):
-            doc['uploaded_at'] = doc['uploaded_at'].isoformat()
+        isoformat_fields(doc, ('uploaded_at',))
 
     return jsonify(documents), 200
 
 
 @agents_bp.route('/api/agents/<agent_id>/documents/<filename>/index', methods=['POST'])
 @token_required
-def index_document_endpoint(agent_id, filename):
-    try:
-        agent = agents_col.find_one({'_id': ObjectId(agent_id), 'user_id': request.user_id})
-    except Exception:
-        return jsonify({'error': INVALID_ID}), 400
-
-    if not agent:
-        return jsonify({'error': AGENT_NOT_FOUND}), 404
-
+@with_agent
+def index_document_endpoint(agent_id, filename, agent):
     doc = next((d for d in agent.get('documents', []) if d['filename'] == filename), None)
     if not doc:
         return jsonify({'error': 'Document not found'}), 404
@@ -264,15 +221,8 @@ def index_document_endpoint(agent_id, filename):
 
 @agents_bp.route('/api/agents/<agent_id>/documents/<filename>', methods=['DELETE'])
 @token_required
-def delete_document(agent_id, filename):
-    try:
-        agent = agents_col.find_one({'_id': ObjectId(agent_id), 'user_id': request.user_id})
-    except Exception:
-        return jsonify({'error': INVALID_ID}), 400
-
-    if not agent:
-        return jsonify({'error': AGENT_NOT_FOUND}), 404
-
+@with_agent
+def delete_document(agent_id, filename, agent):
     documents = agent.get('documents', [])
     doc = next((d for d in documents if d['filename'] == filename), None)
     if not doc:
@@ -313,15 +263,8 @@ def _save_message(agent_id, user_id, role, content):
 
 @agents_bp.route('/api/agents/<agent_id>/chat', methods=['POST'])
 @token_required
-def chat(agent_id):
-    try:
-        agent = agents_col.find_one({'_id': ObjectId(agent_id), 'user_id': request.user_id})
-    except Exception:
-        return jsonify({'error': INVALID_ID}), 400
-
-    if not agent:
-        return jsonify({'error': AGENT_NOT_FOUND}), 404
-
+@with_agent
+def chat(agent_id, agent):
     data = request.get_json()
     if not data:
         return jsonify({'error': BODY_REQUIRED}), 400
@@ -354,37 +297,22 @@ def chat(agent_id):
 
 @agents_bp.route('/api/agents/<agent_id>/chat/history', methods=['GET'])
 @token_required
-def get_chat_history(agent_id):
-    try:
-        agent = agents_col.find_one({'_id': ObjectId(agent_id), 'user_id': request.user_id})
-    except Exception:
-        return jsonify({'error': INVALID_ID}), 400
-
-    if not agent:
-        return jsonify({'error': AGENT_NOT_FOUND}), 404
-
+@with_agent
+def get_chat_history(agent_id, agent):
     messages = list(chat_messages_col.find(
         {'agent_id': agent_id, 'user_id': request.user_id}
     ).sort('created_at', 1))
 
     for m in messages:
-        m['_id'] = str(m['_id'])
-        m['created_at'] = m['created_at'].isoformat()
+        serialize_doc(m)
 
     return jsonify(messages), 200
 
 
 @agents_bp.route('/api/agents/<agent_id>/chat/history', methods=['DELETE'])
 @token_required
-def clear_chat_history(agent_id):
-    try:
-        agent = agents_col.find_one({'_id': ObjectId(agent_id), 'user_id': request.user_id})
-    except Exception:
-        return jsonify({'error': INVALID_ID}), 400
-
-    if not agent:
-        return jsonify({'error': AGENT_NOT_FOUND}), 404
-
+@with_agent
+def clear_chat_history(agent_id, agent):
     chat_messages_col.delete_many({'agent_id': agent_id, 'user_id': request.user_id})
     return jsonify({'message': 'Chat history cleared'}), 200
 
@@ -392,15 +320,8 @@ def clear_chat_history(agent_id):
 # ─── Endpoint público (sin JWT, con API Key opcional) ─────
 
 @agents_bp.route('/api/public/agents/<agent_id>/chat', methods=['POST'])
-def public_chat(agent_id):
-    try:
-        agent = agents_col.find_one({'_id': ObjectId(agent_id)})
-    except Exception:
-        return jsonify({'error': INVALID_ID}), 400
-
-    if not agent:
-        return jsonify({'error': AGENT_NOT_FOUND}), 404
-
+@with_public_agent
+def public_chat(agent_id, agent):
     error = api_key_error(agent)
     if error:
         return error

@@ -2,20 +2,18 @@ from flask import Blueprint, request, jsonify
 from bson import ObjectId
 from datetime import datetime, timezone
 import secrets
-from db import agents_col, api_keys_col
+from db import api_keys_col
+from middleware.agent_middleware import INVALID_ID, with_agent
 from middleware.auth_middleware import token_required
+from serializers import serialize_doc
 
 api_keys_bp = Blueprint('api_keys', __name__)
 
-AGENT_NOT_FOUND = 'Agent not found'
-INVALID_ID      = 'Invalid ID'
 KEY_NOT_FOUND   = 'API key not found'
 
 
 def _serialize_key(key, reveal=False):
-    key['_id'] = str(key['_id'])
-    if 'created_at' in key and isinstance(key['created_at'], datetime):
-        key['created_at'] = key['created_at'].isoformat()
+    serialize_doc(key)
     if not reveal:
         raw = key.get('key', '')
         key['key'] = raw[:8] + '...' if len(raw) > 8 else raw
@@ -24,30 +22,16 @@ def _serialize_key(key, reveal=False):
 
 @api_keys_bp.route('/api/agents/<agent_id>/api-keys', methods=['GET'])
 @token_required
-def list_keys(agent_id):
-    try:
-        agent = agents_col.find_one({'_id': ObjectId(agent_id), 'user_id': request.user_id})
-    except Exception:
-        return jsonify({'error': INVALID_ID}), 400
-
-    if not agent:
-        return jsonify({'error': AGENT_NOT_FOUND}), 404
-
+@with_agent
+def list_keys(agent_id, agent):
     keys = list(api_keys_col.find({'agent_id': agent_id, 'user_id': request.user_id}))
     return jsonify([_serialize_key(k) for k in keys]), 200
 
 
 @api_keys_bp.route('/api/agents/<agent_id>/api-keys', methods=['POST'])
 @token_required
-def create_key(agent_id):
-    try:
-        agent = agents_col.find_one({'_id': ObjectId(agent_id), 'user_id': request.user_id})
-    except Exception:
-        return jsonify({'error': INVALID_ID}), 400
-
-    if not agent:
-        return jsonify({'error': AGENT_NOT_FOUND}), 404
-
+@with_agent
+def create_key(agent_id, agent):
     data = request.get_json() or {}
     name = data.get('name', '').strip() or f"Key {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
     raw_key = 'ak-' + secrets.token_urlsafe(32)

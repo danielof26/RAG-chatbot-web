@@ -1,23 +1,13 @@
 from flask import Blueprint, jsonify, render_template_string
-from bson import ObjectId
-from db import agents_col
+from middleware.agent_middleware import with_public_agent
 
 openapi_bp = Blueprint('openapi', __name__)
 
-AGENT_NOT_FOUND = 'Agent not found'
-INVALID_ID = 'Invalid ID agent'
 
 
 @openapi_bp.route('/api/agents/<agent_id>/openapi.json', methods=['GET'])
-def agent_openapi_spec(agent_id):
-    try:
-        agent = agents_col.find_one({'_id': ObjectId(agent_id)})
-    except Exception:
-        return jsonify({'error': INVALID_ID}), 400
-
-    if not agent:
-        return jsonify({'error': AGENT_NOT_FOUND}), 404
-
+@with_public_agent
+def agent_openapi_spec(agent_id, agent):
     path = f'/api/public/agents/{agent_id}/chat'
     operation = {
         'summary': f'Ask "{agent.get("name", "this agent")}" a question',

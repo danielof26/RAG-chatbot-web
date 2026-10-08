@@ -1,51 +1,34 @@
 from flask import Blueprint, request, jsonify
 from bson import ObjectId
 from datetime import datetime, timezone
-from db import agents_col, config_snapshots_col
+from db import config_snapshots_col
+from middleware.agent_middleware import INVALID_ID, with_agent
 from middleware.auth_middleware import token_required
+from serializers import serialize_doc
 
 config_snapshots_bp = Blueprint('config_snapshots', __name__)
 
-AGENT_NOT_FOUND    = 'Agent not found'
-INVALID_ID         = 'Invalid ID'
 SNAPSHOT_NOT_FOUND = 'Configuration snapshot not found'
 
 SNAPSHOT_FIELDS = ['llm_server_id', 'llm_model', 'embed_server_id', 'embed_model', 'rag_config']
 
 
 def _serialize(snapshot):
-    snapshot['_id'] = str(snapshot['_id'])
-    if 'created_at' in snapshot and isinstance(snapshot['created_at'], datetime):
-        snapshot['created_at'] = snapshot['created_at'].isoformat()
-    return snapshot
+    return serialize_doc(snapshot)
 
 
 @config_snapshots_bp.route('/api/agents/<agent_id>/config-snapshots', methods=['GET'])
 @token_required
-def list_snapshots(agent_id):
-    try:
-        agent = agents_col.find_one({'_id': ObjectId(agent_id), 'user_id': request.user_id})
-    except Exception:
-        return jsonify({'error': INVALID_ID}), 400
-
-    if not agent:
-        return jsonify({'error': AGENT_NOT_FOUND}), 404
-
+@with_agent
+def list_snapshots(agent_id, agent):
     snapshots = list(config_snapshots_col.find({'agent_id': agent_id, 'user_id': request.user_id}))
     return jsonify([_serialize(s) for s in snapshots]), 200
 
 
 @config_snapshots_bp.route('/api/agents/<agent_id>/config-snapshots', methods=['POST'])
 @token_required
-def create_snapshot(agent_id):
-    try:
-        agent = agents_col.find_one({'_id': ObjectId(agent_id), 'user_id': request.user_id})
-    except Exception:
-        return jsonify({'error': INVALID_ID}), 400
-
-    if not agent:
-        return jsonify({'error': AGENT_NOT_FOUND}), 404
-
+@with_agent
+def create_snapshot(agent_id, agent):
     data = request.get_json() or {}
     name = data.get('name', '').strip() or f"Config {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
 

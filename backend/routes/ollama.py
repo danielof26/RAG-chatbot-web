@@ -1,9 +1,9 @@
 from flask import Blueprint, request, jsonify, Response
-from bson import ObjectId
+from bson.errors import InvalidId
 from datetime import datetime, timezone
 import json
-from db import agents_col
 from middleware.auth_middleware import api_key_error
+from repositories.agent_repository import AgentRepository
 from services.rag_service import query_agent, stream_query_agent
 
 ollama_bp = Blueprint('ollama', __name__)
@@ -14,8 +14,8 @@ DEFAULT_MODEL = 'llama3.2:3b'
 
 def _get_agent(agent_id):
     try:
-        return agents_col.find_one({'_id': ObjectId(agent_id)})
-    except Exception:
+        return AgentRepository.find(agent_id)
+    except InvalidId:
         return None
 
 
