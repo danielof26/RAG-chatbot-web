@@ -244,9 +244,14 @@ def _build_global_results(per_question: list, time_seconds: float) -> dict:
 def _cleanup_eval_collection(run_id: str):
     try:
         import chromadb
-        chromadb.PersistentClient(path=config.CHROMA_PATH).delete_collection(f'eval_{run_id}')
+        client = chromadb.PersistentClient(path=config.CHROMA_PATH)
     except Exception:
-        pass
+        return
+    for name in (f'eval_{run_id}', f'eval_{run_id}_raptor'):
+        try:
+            client.delete_collection(name)
+        except Exception:
+            pass
 
 
 def run_evaluation(run_id: str):

@@ -261,6 +261,7 @@ def run_rag(query_engine, questions, architecture="naive", llm=None,
 
         strategy = get_query_strategy(retrieval_mode)
         rag_answer, response = strategy.execute(query_engine, original_question, llm, synthesis_question=question_text)
+        rag_answer = _clean_answer(rag_answer)
         hallucinations = -1
         citations      = []
 

@@ -5,8 +5,13 @@ from llama_index.core import QueryBundle
 _SELF_RAG_DEBUG = True  # set to False to disable Self-RAG evaluation logging
 
 
+def _to_text(text) -> str:
+    return str(text).strip()
+
+
 def _clean_answer(text) -> str:
-    return str(text).strip().replace('\n', ' ').replace(';', ',')
+    """Flattens an answer to one CSV-safe line. Only for evaluation (run_rag), never for chat output."""
+    return _to_text(text).replace('\n', ' ').replace(';', ',')
 
 
 def _generate_hypothetical(question: str, llm) -> str:
@@ -35,7 +40,7 @@ class QueryStrategy(ABC):
         else:
             query = synthesis_question
         response = query_engine.query(query)
-        answer = _clean_answer(response)
+        answer = _to_text(response)
         return answer, response
 
 
@@ -71,7 +76,7 @@ class CRAGStrategy(QueryStrategy):
 
         chunks = "\n---\n".join(n.text for n in relevant)
         prompt = f"Context:\n{chunks}\n\nQuestion: {synthesis_question}\n\nAnswer:"
-        answer = _clean_answer(llm.complete(prompt))
+        answer = _to_text(llm.complete(prompt))
         return answer, _CRAGResponse(relevant)
 
     def _grade(self, chunk: str, question: str, llm) -> str:
@@ -96,7 +101,7 @@ class SelfRAGStrategy(QueryStrategy):
         synthesis_question = synthesis_question or question
 
         response = query_engine.query(synthesis_question)
-        answer = _clean_answer(response)
+        answer = _to_text(response)
 
         if llm:
             evaluation = self._evaluate(question, response.source_nodes, answer, llm)
@@ -113,7 +118,7 @@ class SelfRAGStrategy(QueryStrategy):
                     f"Question: {question}\n\n"
                     f"Rewrite the answer fixing the problems above using only the fragments provided."
                 )
-                answer = _clean_answer(llm.complete(prompt))
+                answer = _to_text(llm.complete(prompt))
 
         return answer, response
 
