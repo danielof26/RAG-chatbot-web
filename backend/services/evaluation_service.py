@@ -149,7 +149,14 @@ def _build_query_engine(run_id: str, agent: dict, snapshot: dict, file_paths: li
         chunk_size=rag_config.get('chunk_size', 512),
         chunk_overlap=rag_config.get('chunk_overlap', 50),
         top_k=rag_config.get('similarity_top_k', 5),
-        temperature=rag_config.get('temperature', 0.1)
+        temperature=rag_config.get('temperature', 0.1),
+        synthesis_mode=rag_config.get('synthesis_mode', 'compact'),
+        similarity_cutoff=rag_config.get('similarity_cutoff') if rag_config.get('sim_filter') else None,
+        rerank=rag_config.get('rerank', False),
+        rerank_top_n=rag_config.get('rerank_top_n', 3),
+        retrieval_mode=rag_config.get('retrieval_mode', 'naive'),
+        fusion_num_queries=rag_config.get('fusion_num_queries', 1),
+        long_reorder=rag_config.get('long_reorder', False),
     )
 
 

@@ -4,16 +4,27 @@ from llama_index.core import VectorStoreIndex, Settings, SimpleDirectoryReader, 
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.postprocessor import SimilarityPostprocessor
 from llama_index.core.postprocessor import SentenceTransformerRerank
+from llama_index.core.postprocessor import LongContextReorder
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from services.query_strategies import get_query_strategy, _clean_answer
+from services.rag_service import (
+    _build_router_engine, _build_fusion_engine, _build_raptor_engine,
+    _build_sub_question_engine, _build_bm25_engine,
+)
 
 _TRACE_SEP = "=" * 80
 
 
 def setup_rag(llm_provider, embed_provider, model_name, embed_model, file_paths, chroma_path, chroma_col,
               prompt, chunk_size=1024, chunk_overlap=200, top_k=15, temperature=0.1, synthesis_mode='compact',
-              similarity_cutoff=None, rerank=False, rerank_top_n=3):
-    """Initialises the LLM, embedding model, ChromaDB vector store and LlamaIndex query engine."""
+              similarity_cutoff=None, rerank=False, rerank_top_n=3, retrieval_mode='naive',
+              fusion_num_queries=1, long_reorder=False):
+    """
+    Initialises the LLM, embedding model, ChromaDB vector store and LlamaIndex query engine.
+    Dispatches on retrieval_mode using the same engine builders as rag_service.py (chat path),
+    so evaluations exercise the real router/fusion/raptor/sub_question/bm25 engines instead of
+    always falling back to the plain vector engine.
+    """
     llm = llm_provider.build_llm(model=model_name, system_prompt=prompt, temperature=temperature)
 
     Settings.embed_model = embed_provider.build_embedding(model=embed_model)
@@ -36,8 +47,22 @@ def setup_rag(llm_provider, embed_provider, model_name, embed_model, file_paths,
         postprocessors.append(SimilarityPostprocessor(similarity_cutoff=similarity_cutoff))
     if rerank:
         postprocessors.append(SentenceTransformerRerank(model='cross-encoder/ms-marco-MiniLM-L-6-v2', top_n=rerank_top_n))
-    query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
-                                         node_postprocessors=postprocessors)
+    if long_reorder:
+        postprocessors.append(LongContextReorder())
+
+    if retrieval_mode == 'router':
+        query_engine = _build_router_engine(index, llm, top_k, node_postprocessors=postprocessors)
+    elif retrieval_mode == 'fusion':
+        query_engine = _build_fusion_engine(index, chroma_collection, top_k, fusion_num_queries, node_postprocessors=postprocessors)
+    elif retrieval_mode == 'raptor':
+        query_engine = _build_raptor_engine(chroma_col, chroma_collection, top_k, synthesis_mode, node_postprocessors=postprocessors)
+    elif retrieval_mode == 'sub_question':
+        query_engine = _build_sub_question_engine(index, top_k, node_postprocessors=postprocessors)
+    elif retrieval_mode == 'bm25':
+        query_engine = _build_bm25_engine(chroma_collection, top_k, node_postprocessors=postprocessors)
+    else:
+        query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
+                                             node_postprocessors=postprocessors)
     return query_engine, llm
 
 

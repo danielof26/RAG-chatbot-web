@@ -122,12 +122,14 @@ def index_document(agent_id: str, file_path: str, embed_model: str = None, embed
     )
 
 
-def _build_router_engine(index, llm, top_k: int):
+def _build_router_engine(index, llm, top_k: int, node_postprocessors=None):
     from llama_index.core.query_engine import RouterQueryEngine, SubQuestionQueryEngine, CustomQueryEngine
     from llama_index.core.selectors import LLMSingleSelector
     from llama_index.core.tools import QueryEngineTool
 
-    engine_simple = index.as_query_engine(similarity_top_k=top_k, response_mode='compact')
+    node_postprocessors = node_postprocessors or []
+    engine_simple = index.as_query_engine(similarity_top_k=top_k, response_mode='compact',
+                                           node_postprocessors=node_postprocessors)
 
     from llama_index.core.question_gen import LLMQuestionGenerator
     engine_multihop = SubQuestionQueryEngine.from_defaults(
@@ -141,7 +143,8 @@ def _build_router_engine(index, llm, top_k: int):
         use_async=False
     )
 
-    engine_summary = index.as_query_engine(similarity_top_k=top_k * 3, response_mode='tree_summarize')
+    engine_summary = index.as_query_engine(similarity_top_k=top_k * 3, response_mode='tree_summarize',
+                                            node_postprocessors=node_postprocessors)
 
     class _OODEngine(CustomQueryEngine):
         def custom_query(self, query_str: str):
@@ -181,7 +184,7 @@ def _build_router_engine(index, llm, top_k: int):
     return RouterQueryEngine(selector=LLMSingleSelector.from_defaults(), query_engine_tools=tools, verbose=True)
 
 
-def _build_sub_question_engine(index, top_k: int):
+def _build_sub_question_engine(index, top_k: int, node_postprocessors=None):
     """
     Descompone la pregunta en sub-preguntas (vía LLMQuestionGenerator) y responde cada una
     por separado contra el índice vectorial antes de combinar las respuestas parciales.
@@ -192,7 +195,8 @@ def _build_sub_question_engine(index, top_k: int):
     from llama_index.core.question_gen import LLMQuestionGenerator
     from llama_index.core.tools import QueryEngineTool
 
-    base_engine = index.as_query_engine(similarity_top_k=top_k, response_mode='compact')
+    base_engine = index.as_query_engine(similarity_top_k=top_k, response_mode='compact',
+                                         node_postprocessors=node_postprocessors or [])
     return SubQuestionQueryEngine.from_defaults(
         query_engine_tools=[
             QueryEngineTool.from_defaults(
@@ -205,24 +209,42 @@ def _build_sub_question_engine(index, top_k: int):
     )
 
 
-def _build_raptor_engine(agent_id: str, chroma_collection, top_k: int, synthesis_mode: str):
+# Chroma stores these alongside a node's own metadata for its internal bookkeeping (notably
+# _node_content, a JSON dump of the entire original node — text, relationships, class info —
+# which can be larger than the chunk's own text). They must be stripped before reusing a
+# chunk's metadata to build a brand new Document/TextNode, or that bookkeeping leaks into the
+# new node's own metadata and inflates every token budget (chunking, embedding, LLM prompt)
+# that accounts for metadata size.
+_CHROMA_INTERNAL_METADATA_KEYS = {'_node_content', '_node_type', 'doc_id', 'ref_doc_id', 'document_id'}
+
+
+def _clean_chroma_metadata(meta: dict) -> dict:
+    return {k: v for k, v in (meta or {}).items() if k not in _CHROMA_INTERNAL_METADATA_KEYS}
+
+
+def _build_raptor_engine(collection_key: str, chroma_collection, top_k: int, synthesis_mode: str, node_postprocessors=None):
+    """
+    collection_key identifies the RAPTOR tree's own ChromaDB collection (separate from the
+    base vector index). The chat path uses "agent_{agent_id}" and the evaluation path uses
+    "eval_{run_id}", matching each one's own base collection name.
+    """
     from llama_index.core.query_engine import RetrieverQueryEngine
     from llama_index.core import Document
     from services.raptor_retriever import RaptorRetriever
 
     db = chromadb.PersistentClient(path=config.CHROMA_PATH)
-    raptor_chroma = db.get_or_create_collection(f"agent_{agent_id}_raptor")
+    raptor_chroma = db.get_or_create_collection(f"{collection_key}_raptor")
     raptor_vector_store = ChromaVectorStore(chroma_collection=raptor_chroma)
 
     if raptor_chroma.count() == 0:
-        print(f"[RAPTOR] Building tree for agent {agent_id}...")
+        print(f"[RAPTOR] Building tree for {collection_key}...")
         raw = chroma_collection.get(include=['documents', 'metadatas'])
         documents = [
-            Document(text=text, metadata=meta or {})
+            Document(text=text, metadata=_clean_chroma_metadata(meta))
             for text, meta in zip(raw['documents'], raw['metadatas'])
         ]
     else:
-        print(f"[RAPTOR] Reusing existing tree ({raptor_chroma.count()} nodes) for agent {agent_id}.")
+        print(f"[RAPTOR] Reusing existing tree ({raptor_chroma.count()} nodes) for {collection_key}.")
         documents = []
 
     retriever = RaptorRetriever(
@@ -235,7 +257,8 @@ def _build_raptor_engine(agent_id: str, chroma_collection, top_k: int, synthesis
         mode="collapsed",
     )
 
-    return RetrieverQueryEngine.from_args(retriever, response_mode=synthesis_mode)
+    return RetrieverQueryEngine.from_args(retriever, response_mode=synthesis_mode,
+                                           node_postprocessors=node_postprocessors or [])
 
 
 
@@ -247,18 +270,19 @@ def _build_bm25_retriever(chroma_collection, top_k: int):
 
     raw = chroma_collection.get(include=['documents', 'metadatas'])
     nodes = [
-        TextNode(text=doc, metadata=meta or {})
+        TextNode(text=doc, metadata=_clean_chroma_metadata(meta))
         for doc, meta in zip(raw['documents'], raw['metadatas'])
     ]
     return BM25Retriever.from_defaults(nodes=nodes, similarity_top_k=top_k)
 
 
-def _build_bm25_engine(chroma_collection, top_k: int):
+def _build_bm25_engine(chroma_collection, top_k: int, node_postprocessors=None):
     from llama_index.core.query_engine import RetrieverQueryEngine
-    return RetrieverQueryEngine.from_args(_build_bm25_retriever(chroma_collection, top_k))
+    return RetrieverQueryEngine.from_args(_build_bm25_retriever(chroma_collection, top_k),
+                                           node_postprocessors=node_postprocessors or [])
 
 
-def _build_fusion_engine(index, chroma_collection, top_k: int, top_q: int):
+def _build_fusion_engine(index, chroma_collection, top_k: int, top_q: int, node_postprocessors=None):
     from llama_index.core.retrievers import QueryFusionRetriever
     from llama_index.core.query_engine import RetrieverQueryEngine
 
@@ -273,7 +297,7 @@ def _build_fusion_engine(index, chroma_collection, top_k: int, top_q: int):
         use_async=False,
         verbose=True,
     )
-    return RetrieverQueryEngine.from_args(fusion_retriever)
+    return RetrieverQueryEngine.from_args(fusion_retriever, node_postprocessors=node_postprocessors or [])
 
 
 def query_agent(agent_id: str, question: str, agent_config: dict, chat_history: list = None) -> str:
@@ -323,15 +347,15 @@ def query_agent(agent_id: str, question: str, agent_config: dict, chat_history: 
     if long_reorder:
         postprocessors.append(LongContextReorder())
     if retrieval_mode == 'router':
-        query_engine = _build_router_engine(index, Settings.llm, top_k)
+        query_engine = _build_router_engine(index, Settings.llm, top_k, node_postprocessors=postprocessors)
     elif retrieval_mode == 'fusion':
-        query_engine = _build_fusion_engine(index, chroma_collection, top_k, top_q)
+        query_engine = _build_fusion_engine(index, chroma_collection, top_k, top_q, node_postprocessors=postprocessors)
     elif retrieval_mode == 'raptor':
-        query_engine = _build_raptor_engine(agent_id, chroma_collection, top_k, synthesis_mode)
+        query_engine = _build_raptor_engine(f"agent_{agent_id}", chroma_collection, top_k, synthesis_mode, node_postprocessors=postprocessors)
     elif retrieval_mode == 'sub_question':
-        query_engine = _build_sub_question_engine(index, top_k)
+        query_engine = _build_sub_question_engine(index, top_k, node_postprocessors=postprocessors)
     elif retrieval_mode == 'bm25':
-        query_engine = _build_bm25_engine(chroma_collection, top_k)
+        query_engine = _build_bm25_engine(chroma_collection, top_k, node_postprocessors=postprocessors)
     else:
         query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
                                              node_postprocessors=postprocessors)
@@ -390,15 +414,15 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict, chat_hi
     if long_reorder:
         postprocessors.append(LongContextReorder())
     if retrieval_mode == 'router':
-        query_engine = _build_router_engine(index, Settings.llm, top_k)
+        query_engine = _build_router_engine(index, Settings.llm, top_k, node_postprocessors=postprocessors)
     elif retrieval_mode == 'fusion':
-        query_engine = _build_fusion_engine(index, chroma_collection, top_k, top_q)
+        query_engine = _build_fusion_engine(index, chroma_collection, top_k, top_q, node_postprocessors=postprocessors)
     elif retrieval_mode == 'raptor':
-        query_engine = _build_raptor_engine(agent_id, chroma_collection, top_k, synthesis_mode)
+        query_engine = _build_raptor_engine(f"agent_{agent_id}", chroma_collection, top_k, synthesis_mode, node_postprocessors=postprocessors)
     elif retrieval_mode == 'sub_question':
-        query_engine = _build_sub_question_engine(index, top_k)
+        query_engine = _build_sub_question_engine(index, top_k, node_postprocessors=postprocessors)
     elif retrieval_mode == 'bm25':
-        query_engine = _build_bm25_engine(chroma_collection, top_k)
+        query_engine = _build_bm25_engine(chroma_collection, top_k, node_postprocessors=postprocessors)
     else:
         query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
                                              node_postprocessors=postprocessors, streaming=True)
