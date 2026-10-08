@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 import os
 import threading
 import traceback
-from db import agents_col, api_keys_col, chat_messages_col
-from middleware.auth_middleware import token_required
+from db import agents_col, chat_messages_col
+from middleware.auth_middleware import token_required, api_key_error
 from services.rag_service import index_document, query_agent, delete_agent_collection, delete_document_vectors
 import config
 
@@ -175,13 +175,15 @@ def upload_document(agent_id):
         return jsonify({'error': 'No document has been uploaded'}), 400
 
     file = request.files['file']
-    if not file.filename:
+    # Solo el nombre base: evita que "../../x" escriba fuera de la carpeta del agente
+    filename = os.path.basename(file.filename.replace('\\', '/')) if file.filename else ''
+    if filename in ('', '.', '..'):
         return jsonify({'error': 'Document name is empty'}), 400
 
     # Guardar archivo en disco
     agent_folder = os.path.join(config.UPLOADS_PATH, agent_id)
     os.makedirs(agent_folder, exist_ok=True)
-    file_path = os.path.join(agent_folder, file.filename)
+    file_path = os.path.join(agent_folder, filename)
     file.save(file_path)
 
     # Guardar metadatos en MongoDB con estado pendiente
@@ -189,7 +191,7 @@ def upload_document(agent_id):
         {'_id': ObjectId(agent_id)},
         {
             '$push': {'documents': {
-                'filename': file.filename,
+                'filename': filename,
                 'file_path': file_path,
                 'uploaded_at': datetime.now(timezone.utc),
                 'status': 'pending'
@@ -201,12 +203,12 @@ def upload_document(agent_id):
     # Lanzar la indexación automáticamente
     thread = threading.Thread(
         target=_index_in_background,
-        args=(agent_id, file_path, agent.get('embed_model'), agent.get('embed_server_id'), agent.get('rag_config', {}), file.filename),
+        args=(agent_id, file_path, agent.get('embed_model'), agent.get('embed_server_id'), agent.get('rag_config', {}), filename),
         daemon=True
     )
     thread.start()
 
-    return jsonify({'message': f'Document "{file.filename}" uploaded. Indexing started.'}), 201
+    return jsonify({'message': f'Document "{filename}" uploaded. Indexing started.'}), 201
 
 
 @agents_bp.route('/api/agents/<agent_id>/documents', methods=['GET'])
@@ -398,11 +400,9 @@ def public_chat(agent_id):
     if not agent:
         return jsonify({'error': AGENT_NOT_FOUND}), 404
 
-    if agent.get('api_key_required', False):
-        provided = request.headers.get('X-API-Key', '')
-        valid = api_keys_col.find_one({'agent_id': agent_id, 'key': provided})
-        if not valid:
-            return jsonify({'error': 'Invalid or missing API key'}), 401
+    error = api_key_error(agent)
+    if error:
+        return error
 
     data = request.get_json()
     if not data:

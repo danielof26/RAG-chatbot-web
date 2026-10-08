@@ -25,3 +25,14 @@ def token_required(f):
 
         return f(*args, **kwargs)
     return decorated
+
+
+def api_key_error(agent):
+    """Devuelve una respuesta 401 si el agente exige API key y la petición no trae una válida; si no, None."""
+    if not agent.get('api_key_required', False):
+        return None
+    from db import api_keys_col
+    provided = request.headers.get('X-API-Key', '')
+    if api_keys_col.find_one({'agent_id': str(agent['_id']), 'key': provided}):
+        return None
+    return jsonify({'error': 'Invalid or missing API key'}), 401

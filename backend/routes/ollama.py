@@ -3,6 +3,7 @@ from bson import ObjectId
 from datetime import datetime, timezone
 import json
 from db import agents_col
+from middleware.auth_middleware import api_key_error
 from services.rag_service import query_agent, stream_query_agent
 
 ollama_bp = Blueprint('ollama', __name__)
@@ -45,6 +46,10 @@ def generate(agent_id):
     agent = _get_agent(agent_id)
     if not agent:
         return jsonify({'error': AGENT_NOT_FOUND}), 404
+
+    error = api_key_error(agent)
+    if error:
+        return error
 
     data = request.get_json(force=True, silent=True)
     if not data:
@@ -106,6 +111,10 @@ def chat(agent_id):
     agent = _get_agent(agent_id)
     if not agent:
         return jsonify({'error': AGENT_NOT_FOUND}), 404
+
+    error = api_key_error(agent)
+    if error:
+        return error
 
     data = request.get_json(force=True, silent=True)
     if not data:

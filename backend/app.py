@@ -1,5 +1,6 @@
 # backend/app.py
 import os
+import sys
 from flask import Flask, send_from_directory
 from flask_cors import CORS
 from routes.auth import auth_bp
@@ -36,4 +37,5 @@ def serve_react(path):
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5001, host='0.0.0.0')
+    # El debugger de Werkzeug permite ejecutar código remoto: solo se activa con --debug
+    app.run(debug='--debug' in sys.argv, port=5001, host='0.0.0.0')
