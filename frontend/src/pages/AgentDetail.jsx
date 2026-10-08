@@ -2,121 +2,11 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useApi } from '../api/useApi'
+import {
+  initTechsFromMode, computeRetrievalMode, computeSynthesisMode, blockedTechsFor, toggleTechSet
+} from '../rag/techniques'
 
 const TABS = ['Settings', 'Documents', 'Chat', 'API', 'Advanced', 'Evaluation']
-
-const RAG_SECTIONS = [
-  {
-    id: 'pre', num: 1,
-    title: 'Pre-retrieval · Query transformation',
-    desc: 'Applied before the retriever to improve semantic matching. All combinable with each other. The Router is exclusive in index selection but can coexist with the rest.',
-    techniques: [
-      { id: 'naive',         label: 'Naive (direct)',        impl: true,  desc: 'Uses the question as-is for retrieval. No transformation applied — the baseline. Compatible with CRAG (which also retrieves naively, then filters).',  incompat: ['hyde_answer', 'hyde_combined'] },
-      { id: 'hyde_answer',   label: 'HyDE Answer',          impl: true,  desc: 'Generates a hypothetical answer and uses its embedding as the retrieval query.',           incompat: ['naive', 'hyde_combined', 'crag'] },
-      { id: 'hyde_combined', label: 'HyDE Combined',        impl: true,  desc: 'Embeds both the original question and a hypothetical answer for retrieval.',               incompat: ['naive', 'hyde_answer',   'crag'] },
-      { id: 'multi_query',   label: 'Multi-Query',          impl: false, desc: 'Generates N reformulations of the question and fuses all results to improve recall.',     incompat: [] },
-      { id: 'step_back',     label: 'Step-back Prompting',  impl: false, desc: 'Abstracts the question to a higher-level concept before retrieving.',                     incompat: [] },
-      { id: 'sub_question',  label: 'Sub-question Engine',  impl: true,  desc: 'Decomposes complex questions into sub-questions, each with its own retrieval, then combines the partial answers.', incompat: ['hyde_answer', 'hyde_combined', 'crag', 'self_rag', 'router', 'fusion', 'raptor'] },
-      { id: 'router',        label: 'Adaptive Router',       impl: true,  desc: 'Classifies the query type (factual, multi-hop, summary, out-of-domain) and routes it to the most suitable engine automatically.',        incompat: ['hyde_answer', 'hyde_combined', 'crag', 'self_rag'] },
-    ]
-  },
-  {
-    id: 'idx', num: 2,
-    title: 'Indexing · Knowledge base structure',
-    desc: 'How documents are organized in the index. Choose one per collection — mutually exclusive.',
-    techniques: [
-      { id: 'vector_index',  label: 'Vector Store Index',    impl: true,  desc: 'Dense semantic index — the standard choice for most RAG pipelines.',      incompat: ['summary_index','tree_index','keyword_index','kg_index'] },
-      { id: 'summary_index', label: 'Summary Index (List)',  impl: false, desc: 'Indexes document summaries, useful for high-level summarization queries.', incompat: ['vector_index','tree_index','keyword_index','kg_index'] },
-      { id: 'tree_index',    label: 'Tree Index',            impl: false, desc: 'Hierarchical index built by recursively summarizing chunks up a tree.',    incompat: ['vector_index','summary_index','keyword_index','kg_index'] },
-      { id: 'keyword_index', label: 'Keyword Table Index',   impl: false, desc: 'Keyword-based index, precise for exact-match technical retrieval.',        incompat: ['vector_index','summary_index','tree_index','kg_index'] },
-      { id: 'kg_index',      label: 'Knowledge Graph Index', impl: false, desc: 'Graph-based index for documents with rich entity relationships.',          incompat: ['vector_index','summary_index','tree_index','keyword_index'] },
-    ]
-  },
-  {
-    id: 'chunk', num: 3,
-    title: 'Chunking · Document preprocessing',
-    desc: 'How documents are split before indexing. Choose one. Changes apply only when re-indexing.',
-    techniques: [
-      { id: 'fixed_size',     label: 'Fixed-size',            impl: true,  desc: 'Splits by token count. Configure size and overlap in the fields below.',    incompat: ['sent_window','semantic_chunk','hierarchical'] },
-      { id: 'sent_window',    label: 'Sentence window',       impl: false, desc: 'Chunks by sentence and retrieves with a surrounding context window.',       incompat: ['fixed_size','semantic_chunk','hierarchical'] },
-      { id: 'semantic_chunk', label: 'Semantic chunking',     impl: false, desc: 'Splits at semantic boundaries detected by embedding similarity.',           incompat: ['fixed_size','sent_window','hierarchical'] },
-      { id: 'hierarchical',   label: 'Hierarchical chunking', impl: false, desc: 'Creates chunks at multiple granularity levels (parent + child nodes).',    incompat: ['fixed_size','sent_window','semantic_chunk'] },
-    ]
-  },
-  {
-    id: 'ret', num: 4,
-    title: 'Retrieval · Retriever strategy',
-    desc: 'How relevant nodes are searched within the index. All combinable — Fusion is literally dense + sparse together.',
-    techniques: [
-      { id: 'vec_retriever',  label: 'Vector Store (dense)',    impl: true,  desc: 'Semantic similarity search using embeddings — the standard retriever.',     incompat: [] },
-      { id: 'bm25',           label: 'BM25 (sparse/keyword)',   impl: true,  desc: 'Classic keyword retrieval — complements dense search for exact terms. Used alone here, with no embeddings involved.', incompat: ['fusion', 'router', 'sub_question', 'raptor', 'hyde_answer', 'hyde_combined'] },
-      { id: 'auto_merging',   label: 'Auto-Merging',            impl: false, desc: 'Merges child chunks into parent when enough siblings are retrieved.',      incompat: [] },
-      { id: 'recursive',      label: 'Recursive Retriever',     impl: false, desc: 'Follows references between nodes recursively to complete context.',       incompat: [] },
-      { id: 'fusion',         label: 'Fusion (dense + sparse)', impl: true,  desc: 'Combines vector and BM25 retrievers with reciprocal rank fusion for hybrid retrieval.',  incompat: ['hyde_answer', 'hyde_combined', 'crag', 'self_rag', 'router', 'raptor'] },
-      { id: 'raptor',         label: 'RAPTOR (hierarchical tree)', impl: true, desc: 'Recursively clusters chunks by embedding similarity, generates LLM summaries per cluster and organises them into a tree. Retrieval traverses the tree to return both fine-grained and high-level nodes. Ideal for long or structured documents. The first query builds the index — subsequent ones reuse it.', incompat: ['fusion', 'router', 'hyde_answer', 'hyde_combined'] },
-      { id: 'auto_retrieval', label: 'Auto-Retrieval',          impl: false, desc: 'Extracts metadata filters from the query to narrow the search space.',   incompat: [] },
-    ]
-  },
-  {
-    id: 'post', num: 5,
-    title: 'Post-retrieval · Filtering & reranking',
-    desc: 'Applied after retrieval to improve chunk quality. Most are combinable in pipeline — except the two reranking methods, choose one.',
-    techniques: [
-      { id: 'crag',         label: 'CRAG — Corrective RAG',    impl: true,  desc: 'LLM grades each chunk as relevant/ambiguous/irrelevant and filters the irrelevant ones.', incompat: ['rerank_ce','rerank_llm','hyde_answer','hyde_combined'] },
-      { id: 'self_rag',    label: 'Self-RAG',                 impl: true,  desc: 'After generating, the LLM evaluates its own answer (PASS/FAIL). If FAIL, retries with chunks embedded directly in the prompt.', incompat: [] },
-      { id: 'rerank_ce',    label: 'Reranking (cross-encoder)', impl: true, desc: 'Reranks chunks using a sentence-transformer cross-encoder model.',       incompat: ['crag','rerank_llm'] },
-      { id: 'rerank_llm',   label: 'Reranking (LLM)',          impl: false, desc: 'Reranks chunks by asking the LLM to score each one for relevance.',     incompat: ['crag','rerank_ce'] },
-      { id: 'sim_filter',   label: 'SimilarityPostprocessor',  impl: true,  desc: 'Discards chunks whose similarity score is below a set threshold.',       incompat: [] },
-      { id: 'xai',          label: 'XAI — Explainable RAG',   impl: true,  desc: 'After synthesis, verifies that each cited fragment exists verbatim in the retrieved chunks. Retries up to 2 times if hallucinations are detected. Produces a full traceability log.', incompat: [] },
-      { id: 'kw_filter',    label: 'KeywordNodePostprocessor', impl: false, desc: 'Filters chunks that do not contain required keywords.',                  incompat: [] },
-      { id: 'prev_next',    label: 'PrevNextNodePostprocessor',impl: false, desc: 'Expands each retrieved chunk with its neighbouring chunks for context.', incompat: [] },
-      { id: 'long_reorder', label: 'LongContextReorder',       impl: true,  desc: 'Reorders chunks to place the most relevant at start and end of prompt.',incompat: [] },
-    ]
-  },
-  {
-    id: 'syn', num: 6,
-    title: 'Response synthesis',
-    desc: 'How retrieved chunks are assembled into the final answer. Choose one — mutually exclusive.',
-    techniques: [
-      { id: 'compact',          label: 'Compact (default)', impl: true,  desc: 'Packs chunks into the fewest possible LLM prompts before generating.',           incompat: ['refine','tree_summarize','simple_summarize','accumulate'] },
-      { id: 'refine',           label: 'Refine',            impl: true, desc: 'Iteratively refines the answer chunk by chunk.',                                 incompat: ['compact','tree_summarize','simple_summarize','accumulate'] },
-      { id: 'tree_summarize',   label: 'Tree Summarize',    impl: true, desc: 'Builds a summary tree bottom-up — best for very long documents.',                incompat: ['compact','refine','simple_summarize','accumulate'] },
-      { id: 'simple_summarize', label: 'Simple Summarize',  impl: true, desc: 'Truncates all chunks into a single prompt — fastest but may lose information.', incompat: ['compact','refine','tree_summarize','accumulate'] },
-      { id: 'accumulate',       label: 'Accumulate',        impl: true, desc: 'Generates an answer per chunk independently, then combines them.',               incompat: ['compact','refine','tree_summarize','simple_summarize'] },
-    ]
-  },
-]
-
-const DEFAULT_TECHS = new Set(['vector_index', 'vec_retriever', 'fixed_size'])
-
-const MODE_TECHS = {
-  naive:         ['naive',             'compact'],
-  crag:          ['naive', 'crag',     'compact'],
-  hyde_answer:   ['hyde_answer',       'compact'],
-  hyde_combined: ['hyde_combined',     'compact'],
-  self_rag:      ['naive', 'self_rag', 'compact'],
-  router:        ['router',            'compact'],
-  fusion:        ['fusion',            'compact'],
-  raptor:        ['raptor',            'compact'],
-  sub_question:  ['sub_question',      'compact'],
-  bm25:          ['bm25',              'compact'],
-}
-
-const initTechsFromMode = (mode) => {
-  const t = new Set(DEFAULT_TECHS)
-  ;(MODE_TECHS[mode] ?? ['naive']).forEach(id => t.add(id))
-  return t
-}
-
-const MODE_PRIORITY = ['crag', 'self_rag', 'router', 'sub_question', 'raptor', 'fusion', 'bm25', 'hyde_combined', 'hyde_answer', 'naive']
-
-const computeRetrievalMode = (techs) =>
-  MODE_PRIORITY.find(mode => techs.has(mode)) ?? 'naive'
-
-const SYNTHESIS_PRIORITY = ['refine', 'tree_summarize', 'simple_summarize', 'accumulate', 'compact']
-
-const computeSynthesisMode = (techs) =>
-  SYNTHESIS_PRIORITY.find(mode => techs.has(mode)) ?? 'compact'
 
 export default function AgentDetail() {
   const { id } = useParams()
@@ -165,7 +55,8 @@ export default function AgentDetail() {
   const [similarityCutoff, setSimilarityCutoff] = useState(0.7)
   const [rerankTopN, setRerankTopN] = useState(3)
   const [fusionNumQueries, setFusionNumQueries] = useState(1)
-  const [selectedTechs, setSelectedTechs] = useState(() => initTechsFromMode('naive'))
+  const [catalog, setCatalog] = useState(null)   // technique catalog served by the backend
+  const [selectedTechs, setSelectedTechs] = useState(() => new Set())
   const [savingAdvanced, setSavingAdvanced] = useState(false)
   const [advancedSaveMsg, setAdvancedSaveMsg] = useState('')
   const [convMemory, setConvMemory] = useState(false)
@@ -251,9 +142,11 @@ export default function AgentDetail() {
   }, [agent])
 
   const fetchAgent = async () => {
-    const res = await api.get(`/api/agents/${id}`)
+    const [res, catalogRes] = await Promise.all([api.get(`/api/agents/${id}`), api.get('/api/rag/techniques').catch(() => null)])
     if (!res.ok) { navigate('/agents'); return }
     const data = await res.json()
+    const loadedCatalog = catalogRes?.ok ? await catalogRes.json() : null
+    setCatalog(loadedCatalog)
     setAgent(data)
     setName(data.name || '')
     setDescription(data.description || '')
@@ -270,7 +163,7 @@ export default function AgentDetail() {
     setSimilarityCutoff(data.rag_config?.similarity_cutoff ?? 0.7)
     setRerankTopN(data.rag_config?.rerank_top_n ?? 3)
     setFusionNumQueries(data.rag_config?.fusion_num_queries ?? 1)
-    const techs = initTechsFromMode(data.rag_config?.retrieval_mode ?? 'naive')
+    const techs = loadedCatalog ? initTechsFromMode(loadedCatalog, data.rag_config?.retrieval_mode ?? 'naive') : new Set()
     const synthMode = data.rag_config?.synthesis_mode ?? 'compact'
     if (synthMode !== 'compact') { techs.delete('compact'); techs.add(synthMode) }
     if (data.rag_config?.sim_filter)   techs.add('sim_filter')
@@ -389,6 +282,7 @@ export default function AgentDetail() {
   }
 
   const handleSaveAdvanced = async () => {
+    if (!catalog) return   // without the catalog the selected mode can't be computed; never overwrite it blindly
     setSavingAdvanced(true)
     setAdvancedSaveMsg('')
     const res = await api.put(`/api/agents/${id}`, {
@@ -397,8 +291,8 @@ export default function AgentDetail() {
           chunk_size: Number(chunkSize),
           chunk_overlap: Number(chunkOverlap),
           temperature: Number(temperature),
-          retrieval_mode: computeRetrievalMode(selectedTechs),
-          synthesis_mode: computeSynthesisMode(selectedTechs),
+          retrieval_mode: computeRetrievalMode(catalog, selectedTechs),
+          synthesis_mode: computeSynthesisMode(catalog, selectedTechs),
           sim_filter: selectedTechs.has('sim_filter'),
           similarity_cutoff: Number(similarityCutoff),
           rerank: selectedTechs.has('rerank_ce'),
@@ -536,25 +430,11 @@ export default function AgentDetail() {
     setMessages(prev => [...prev, { role: 'assistant', content: res.ok ? data.answer : data.error, key: `${Date.now()}-${Math.random().toString(36).slice(2)}` }])
   }
 
-  const blockedTechs = new Set()
-  RAG_SECTIONS.forEach(s => s.techniques.forEach(t => {
-    if (selectedTechs.has(t.id)) t.incompat.forEach(id => blockedTechs.add(id))
-  }))
+  const defaultTechs = new Set(catalog?.default_techs ?? [])
+  const blockedTechs = catalog ? blockedTechsFor(catalog, selectedTechs) : new Set()
 
   const toggleTech = (techId) => {
-    if (DEFAULT_TECHS.has(techId)) return
-    let tech = null
-    for (const s of RAG_SECTIONS) {
-      const found = s.techniques.find(t => t.id === techId)
-      if (found) { tech = found; break }
-    }
-    if (!tech?.impl) return
-    setSelectedTechs(prev => {
-      const next = new Set(prev)
-      if (next.has(techId)) { next.delete(techId) }
-      else { tech.incompat.forEach(id => next.delete(id)); next.add(techId) }
-      return next
-    })
+    if (catalog) setSelectedTechs(prev => toggleTechSet(catalog, prev, techId))
   }
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-sm text-gray-400">Loading...</div>
@@ -1029,10 +909,13 @@ export default function AgentDetail() {
         )}
 
         {/* ── ADVANCED ── */}
-        {activeTab === 'Advanced' && (
+        {activeTab === 'Advanced' && !catalog && (
+          <p className="text-sm text-red-400">Could not load the technique catalog. Reload the page to try again.</p>
+        )}
+        {activeTab === 'Advanced' && catalog && (
           <div className="space-y-4">
 
-            {RAG_SECTIONS.map(section => (
+            {catalog.sections.map(section => (
               <div key={section.id} className="border border-gray-100 rounded-xl px-5 py-4 space-y-3">
 
                 {/* Section header */}
@@ -1050,7 +933,7 @@ export default function AgentDetail() {
                   {section.techniques.map(tech => {
                     const selected  = selectedTechs.has(tech.id)
                     const blocked   = !selected && blockedTechs.has(tech.id)
-                    const isDefault = DEFAULT_TECHS.has(tech.id)
+                    const isDefault = defaultTechs.has(tech.id)
                     const clickable = tech.impl && !blocked && !isDefault
 
                     let cls = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors '
