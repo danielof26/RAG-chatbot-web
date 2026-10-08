@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useApi } from '../api/useApi'
 
 export default function Agents() {
   const [agents, setAgents] = useState([])
@@ -10,7 +11,8 @@ export default function Agents() {
   const [creating, setCreating] = useState(false)
   const [showForm, setShowForm] = useState(false)
 
-  const { token, email, logout } = useAuth()
+  const { email, logout } = useAuth()
+  const api = useApi()
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -19,9 +21,7 @@ export default function Agents() {
 
   const fetchAgents = async () => {
     setLoading(true)
-    const res = await fetch('/api/agents', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
+    const res = await api.get('/api/agents')
     const data = await res.json()
     setAgents(data)
     setLoading(false)
@@ -32,14 +32,7 @@ export default function Agents() {
     if (!newName.trim()) return
     setCreating(true)
 
-    const res = await fetch('/api/agents', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({ name: newName.trim() })
-    })
+    const res = await api.post('/api/agents', { name: newName.trim() })
 
     const data = await res.json()
     setCreating(false)

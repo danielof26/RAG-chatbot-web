@@ -1,7 +1,7 @@
 // src/pages/AgentDetail.jsx
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
+import { useApi } from '../api/useApi'
 
 const TABS = ['Settings', 'Documents', 'Chat', 'API', 'Advanced', 'Evaluation']
 
@@ -120,7 +120,7 @@ const computeSynthesisMode = (techs) =>
 
 export default function AgentDetail() {
   const { id } = useParams()
-  const { token } = useAuth()
+  const api = useApi()
   const navigate = useNavigate()
   const fileRef = useRef()
 
@@ -221,9 +221,7 @@ export default function AgentDetail() {
     if (!llmServerId) { setAvailableModels([]); return }
     const load = async () => {
       setLoadingModels(true)
-      const res = await fetch(`/api/llm-servers/${llmServerId}/models`, {
-        headers: { Authorization: `Bearer ${token}` }
-      })
+      const res = await api.get(`/api/llm-servers/${llmServerId}/models`)
       const data = await res.json()
       setAvailableModels(res.ok ? data.models : [])
       setLoadingModels(false)
@@ -236,9 +234,7 @@ export default function AgentDetail() {
     if (!embedServerId) { setAvailableEmbedModels([]); return }
     const load = async () => {
       setLoadingEmbedModels(true)
-      const res = await fetch(`/api/llm-servers/${embedServerId}/models`, {
-        headers: { Authorization: `Bearer ${token}` }
-      })
+      const res = await api.get(`/api/llm-servers/${embedServerId}/models`)
       const data = await res.json()
       setAvailableEmbedModels(res.ok ? data.models : [])
       setLoadingEmbedModels(false)
@@ -255,9 +251,7 @@ export default function AgentDetail() {
   }, [agent])
 
   const fetchAgent = async () => {
-    const res = await fetch(`/api/agents/${id}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    const res = await api.get(`/api/agents/${id}`)
     if (!res.ok) { navigate('/agents'); return }
     const data = await res.json()
     setAgent(data)
@@ -291,18 +285,14 @@ export default function AgentDetail() {
   }
 
   const fetchDocuments = async () => {
-    const res = await fetch(`/api/agents/${id}/documents`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    const res = await api.get(`/api/agents/${id}/documents`)
     if (!res.ok) return
     const documents = await res.json()
     setAgent(prev => prev && { ...prev, documents })
   }
 
   const fetchLlmServers = async () => {
-    const res = await fetch('/api/llm-servers', {
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    const res = await api.get('/api/llm-servers')
     const data = await res.json()
     setLlmServers(res.ok ? data : [])
   }
@@ -310,19 +300,12 @@ export default function AgentDetail() {
   const handleSave = async () => {
     setSaving(true)
     setSaveMsg('')
-    const res = await fetch(`/api/agents/${id}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify({
+    const res = await api.put(`/api/agents/${id}`, {
         name, description, prompt,
         llm_server_id: llmServerId || null,
         llm_model: llmModel,
         api_key_required: apiKeyRequired
       })
-    })
     setSaving(false)
     if (res.ok) {
       setSaveMsg('Saved!')
@@ -334,10 +317,7 @@ export default function AgentDetail() {
 
   const handleDelete = async () => {
     if (!globalThis.confirm('Delete this agent? This cannot be undone.')) return
-    await fetch(`/api/agents/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    await api.delete(`/api/agents/${id}`)
     navigate('/agents')
   }
 
@@ -348,11 +328,7 @@ export default function AgentDetail() {
     setUploadMsg('')
     const form = new FormData()
     form.append('file', file)
-    const res = await fetch(`/api/agents/${id}/documents`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: form
-    })
+    const res = await api.upload(`/api/agents/${id}/documents`, form)
     const data = await res.json()
     setUploading(false)
     setUploadMsg(res.ok ? data.message : data.error)
@@ -362,37 +338,25 @@ export default function AgentDetail() {
 
   const handleDeleteDocument = async (filename) => {
     if (!globalThis.confirm(`Delete "${filename}"? This cannot be undone.`)) return
-    const res = await fetch(`/api/agents/${id}/documents/${encodeURIComponent(filename)}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    const res = await api.delete(`/api/agents/${id}/documents/${encodeURIComponent(filename)}`)
     if (res.ok) await fetchDocuments()
   }
 
   const handleIndex = async (filename) => {
     setIndexingMsg('')
-    const res = await fetch(`/api/agents/${id}/documents/${encodeURIComponent(filename)}/index`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    const res = await api.post(`/api/agents/${id}/documents/${encodeURIComponent(filename)}/index`)
     const data = await res.json()
     setIndexingMsg(res.ok ? data.message : data.error)
     if (res.ok) await fetchDocuments()
   }
 
   const fetchApiKeys = async () => {
-    const res = await fetch(`/api/agents/${id}/api-keys`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    const res = await api.get(`/api/agents/${id}/api-keys`)
     if (res.ok) setApiKeys(await res.json())
   }
 
   const handleCreateKey = async () => {
-    const res = await fetch(`/api/agents/${id}/api-keys`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ name: newKeyName.trim() || undefined })
-    })
+    const res = await api.post(`/api/agents/${id}/api-keys`, { name: newKeyName.trim() || undefined })
     if (!res.ok) return
     const created = await res.json()
     setCreatedKey(created)
@@ -402,24 +366,17 @@ export default function AgentDetail() {
 
   const handleDeleteKey = async (keyId) => {
     if (!globalThis.confirm('Delete this API key? This cannot be undone.')) return
-    await fetch(`/api/agents/${id}/api-keys/${keyId}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    await api.delete(`/api/agents/${id}/api-keys/${keyId}`)
     await fetchApiKeys()
   }
 
   const handleSaveEmbedSettings = async () => {
     setSavingEmbed(true)
     setEmbedSaveMsg('')
-    const res = await fetch(`/api/agents/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({
+    const res = await api.put(`/api/agents/${id}`, {
         embed_server_id: embedServerId || null,
         embed_model: embedModel
       })
-    })
     setSavingEmbed(false)
     setEmbedSaveMsg(res.ok ? 'Saved!' : 'Error saving')
     if (res.ok) setTimeout(() => setEmbedSaveMsg(''), 2000)
@@ -427,21 +384,14 @@ export default function AgentDetail() {
 
   const handleSaveApiSettings = async () => {
     setSavingApi(true)
-    await fetch(`/api/agents/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ api_key_required: apiKeyRequired })
-    })
+    await api.put(`/api/agents/${id}`, { api_key_required: apiKeyRequired })
     setSavingApi(false)
   }
 
   const handleSaveAdvanced = async () => {
     setSavingAdvanced(true)
     setAdvancedSaveMsg('')
-    const res = await fetch(`/api/agents/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({
+    const res = await api.put(`/api/agents/${id}`, {
         rag_config: {
           similarity_top_k: Number(topK),
           chunk_size: Number(chunkSize),
@@ -461,42 +411,30 @@ export default function AgentDetail() {
           conv_memory_turns: Number(convMemoryTurns)
         }
       })
-    })
     setSavingAdvanced(false)
     setAdvancedSaveMsg(res.ok ? 'Saved!' : 'Error saving')
     if (res.ok) setTimeout(() => setAdvancedSaveMsg(''), 2000)
   }
 
   const fetchSnapshots = async () => {
-    const res = await fetch(`/api/agents/${id}/config-snapshots`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    const res = await api.get(`/api/agents/${id}/config-snapshots`)
     if (res.ok) setSnapshots(await res.json())
   }
 
   const handleCreateSnapshot = async () => {
-    await fetch(`/api/agents/${id}/config-snapshots`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ name: newSnapshotName.trim() || undefined })
-    })
+    await api.post(`/api/agents/${id}/config-snapshots`, { name: newSnapshotName.trim() || undefined })
     setNewSnapshotName('')
     await fetchSnapshots()
   }
 
   const handleDeleteSnapshot = async (snapshotId) => {
     if (!globalThis.confirm('Delete this saved configuration? This cannot be undone.')) return
-    await fetch(`/api/agents/${id}/config-snapshots/${snapshotId}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    await api.delete(`/api/agents/${id}/config-snapshots/${snapshotId}`)
     await fetchSnapshots()
   }
 
   const fetchEvalRuns = async () => {
-    const res = await fetch(`/api/agents/${id}/evaluations`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    const res = await api.get(`/api/agents/${id}/evaluations`)
     if (res.ok) setEvalRuns(await res.json())
   }
 
@@ -514,11 +452,7 @@ export default function AgentDetail() {
     form.append('n_exec', evalNExec)
 
 
-    const res = await fetch(`/api/agents/${id}/evaluations`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: form
-    })
+    const res = await api.upload(`/api/agents/${id}/evaluations`, form)
     const data = await res.json()
     setRunningEval(false)
     setEvalMsg(res.ok ? 'Evaluation started — it will appear below once finished.' : (data.error || 'Error starting evaluation'))
@@ -535,18 +469,14 @@ export default function AgentDetail() {
       return
     }
     setExpandedRunId(runId)
-    const res = await fetch(`/api/agents/${id}/evaluations/${runId}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    const res = await api.get(`/api/agents/${id}/evaluations/${runId}`)
     if (res.ok) setExpandedRunDetail(await res.json())
   }
 
   const handleDownloadCSV = async (r) => {
     let detail = (expandedRunId === r._id && expandedRunDetail) ? expandedRunDetail : null
     if (!detail) {
-      const res = await fetch(`/api/agents/${id}/evaluations/${r._id}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      })
+      const res = await api.get(`/api/agents/${id}/evaluations/${r._id}`)
       if (!res.ok) return
       detail = await res.json()
     }
@@ -572,19 +502,14 @@ export default function AgentDetail() {
 
   const handleDeleteRun = async (runId) => {
     if (!globalThis.confirm('Delete this evaluation run? This cannot be undone.')) return
-    await fetch(`/api/agents/${id}/evaluations/${runId}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    await api.delete(`/api/agents/${id}/evaluations/${runId}`)
     if (expandedRunId === runId) { setExpandedRunId(''); setExpandedRunDetail(null) }
     await fetchEvalRuns()
   }
 
   const fetchChatHistory = async () => {
     setLoadingHistory(true)
-    const res = await fetch(`/api/agents/${id}/chat/history`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    const res = await api.get(`/api/agents/${id}/chat/history`)
     if (res.ok) {
       const history = await res.json()
       setMessages(history.map(m => ({ ...m, key: m._id })))
@@ -594,10 +519,7 @@ export default function AgentDetail() {
 
   const handleClearChat = async () => {
     if (!globalThis.confirm('Clear the whole conversation? This cannot be undone.')) return
-    await fetch(`/api/agents/${id}/chat/history`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    await api.delete(`/api/agents/${id}/chat/history`)
     setMessages([])
   }
 
@@ -608,14 +530,7 @@ export default function AgentDetail() {
     setQuestion('')
     setMessages(prev => [...prev, { role: 'user', content: askedQuestion, key: `${Date.now()}-${Math.random().toString(36).slice(2)}` }])
     setChatLoading(true)
-    const res = await fetch(`/api/agents/${id}/chat`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify({ question: askedQuestion })
-    })
+    const res = await api.post(`/api/agents/${id}/chat`, { question: askedQuestion })
     const data = await res.json()
     setChatLoading(false)
     setMessages(prev => [...prev, { role: 'assistant', content: res.ok ? data.answer : data.error, key: `${Date.now()}-${Math.random().toString(36).slice(2)}` }])

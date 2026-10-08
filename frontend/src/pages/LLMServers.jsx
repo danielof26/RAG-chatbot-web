@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
+import { useApi } from '../api/useApi'
 
 export default function LLMServers() {
-  const { token } = useAuth()
+  const api = useApi()
   const navigate = useNavigate()
 
   const [servers, setServers] = useState([])
@@ -26,9 +26,7 @@ export default function LLMServers() {
 
   const fetchServers = async () => {
     setLoading(true)
-    const res = await fetch('/api/llm-servers', {
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    const res = await api.get('/api/llm-servers')
     const data = await res.json()
     setServers(res.ok ? data : [])
     setLoading(false)
@@ -44,14 +42,7 @@ export default function LLMServers() {
     else if (type === 'openai') { body.base_url = baseUrl; body.api_key = apiKey }
     else body.api_key = apiKey
 
-    const res = await fetch('/api/llm-servers', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify(body)
-    })
+    const res = await api.post('/api/llm-servers', body)
     const data = await res.json()
     setSaving(false)
 
@@ -68,10 +59,7 @@ export default function LLMServers() {
 
   const handleDelete = async (id) => {
     if (!globalThis.confirm('Delete this server?')) return
-    await fetch(`/api/llm-servers/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    await api.delete(`/api/llm-servers/${id}`)
     await fetchServers()
   }
 
