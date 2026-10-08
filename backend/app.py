@@ -11,6 +11,7 @@ from routes.api_keys import api_keys_bp
 from routes.openapi import openapi_bp
 from routes.config_snapshots import config_snapshots_bp
 from routes.evaluations import evaluations_bp
+from services.job_state import recover_interrupted_jobs
 
 FRONTEND_DIST = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'dist')
 
@@ -25,6 +26,14 @@ app.register_blueprint(api_keys_bp)
 app.register_blueprint(openapi_bp)
 app.register_blueprint(config_snapshots_bp)
 app.register_blueprint(evaluations_bp)
+
+# Threads don't survive a restart: mark jobs that were in progress as failed instead of leaving them spinning.
+try:
+    recovered = recover_interrupted_jobs()
+    if any(recovered.values()):
+        print(f'[startup] Marked interrupted jobs as error: {recovered}')
+except Exception as e:
+    print(f'[startup] Could not recover interrupted jobs: {e}')
 
 
 @app.route('/', defaults={'path': ''}, methods=['GET'])

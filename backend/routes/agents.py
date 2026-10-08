@@ -9,22 +9,20 @@ from services.rag_config import RagConfig
 from middleware.agent_middleware import AGENT_NOT_FOUND, INVALID_ID, with_agent, with_public_agent
 from middleware.auth_middleware import token_required, api_key_error
 from serializers import isoformat_fields, serialize_doc
+from services.job_state import claim_document_for_indexing, set_document_status
+from states import DocumentStatus
 from services.rag_service import index_document, query_agent, delete_agent_collection, delete_document_vectors
 import config
 
 agents_bp = Blueprint('agents', __name__)
 
 DOC_FILENAME    = 'documents.filename'
-DOC_STATUS      = 'documents.$.status'
 BODY_REQUIRED   = 'Body JSON required'
 
 
 def _index_in_background(agent_id, file_path, embed_model, embed_server_id, rag_config, filename):
     try:
-        agents_col.update_one(
-            {'_id': ObjectId(agent_id), DOC_FILENAME: filename},
-            {'$set': {DOC_STATUS: 'indexing'}}
-        )
+        set_document_status(agent_id, filename, DocumentStatus.INDEXING)
         index_document(
             agent_id, file_path,
             embed_model=embed_model,
@@ -32,16 +30,10 @@ def _index_in_background(agent_id, file_path, embed_model, embed_server_id, rag_
             chunk_size=rag_config.get('chunk_size'),
             chunk_overlap=rag_config.get('chunk_overlap')
         )
-        agents_col.update_one(
-            {'_id': ObjectId(agent_id), DOC_FILENAME: filename},
-            {'$set': {DOC_STATUS: 'indexed'}}
-        )
+        set_document_status(agent_id, filename, DocumentStatus.INDEXED)
     except Exception as e:
         traceback.print_exc()
-        agents_col.update_one(
-            {'_id': ObjectId(agent_id), DOC_FILENAME: filename},
-            {'$set': {DOC_STATUS: 'error', 'documents.$.error': str(e)}}
-        )
+        set_document_status(agent_id, filename, DocumentStatus.ERROR, error=str(e))
 
 
 def _serialize(agent):
@@ -170,7 +162,7 @@ def upload_document(agent_id, agent):
                 'filename': filename,
                 'file_path': file_path,
                 'uploaded_at': datetime.now(timezone.utc),
-                'status': 'pending'
+                'status': DocumentStatus.PENDING.value
             }},
             '$set': {'updated_at': datetime.now(timezone.utc)}
         }
@@ -206,7 +198,7 @@ def index_document_endpoint(agent_id, filename, agent):
     if not doc:
         return jsonify({'error': 'Document not found'}), 404
 
-    if doc.get('status') == 'indexing':
+    if not claim_document_for_indexing(agent_id, filename):
         return jsonify({'error': 'Document is already being indexed'}), 409
 
     thread = threading.Thread(

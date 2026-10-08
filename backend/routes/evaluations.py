@@ -8,6 +8,7 @@ from db import config_snapshots_col, evaluation_runs_col
 from middleware.agent_middleware import INVALID_ID, with_agent
 from middleware.auth_middleware import token_required
 from services.rag_config import RagConfig
+from states import RunStatus
 from services.evaluation_service import parse_questions_csv, run_evaluation
 
 evaluations_bp = Blueprint('evaluations', __name__)
@@ -130,7 +131,7 @@ def create_evaluation(agent_id, agent):
         'n_exec': n_exec,
         'retrieval_mode': rag_config.retrieval_mode,
         'rag_config': snapshot.get('rag_config', {}),
-        'status': 'running',
+        'status': RunStatus.RUNNING.value,
         'results': None,
         'error': None,
         'created_at': datetime.now(timezone.utc),

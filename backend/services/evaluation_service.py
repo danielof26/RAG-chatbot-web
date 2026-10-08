@@ -2,7 +2,6 @@ import csv
 import io
 import statistics
 import time
-from datetime import datetime, timezone
 
 import spacy
 from bson import ObjectId
@@ -14,6 +13,7 @@ from db import agents_col, config_snapshots_col, evaluation_runs_col, llm_server
 from services.rag_config import RagConfig
 from services.llm_providers import OllamaProvider, get_provider
 from services.rag_engine import run_rag, setup_rag
+from services.job_state import fail_run, finish_run
 from services.rag_service import invalidate_bm25_cache
 
 _NLP_MODELS = {
@@ -279,14 +279,8 @@ def run_evaluation(run_id: str):
             'global': _build_global_results(per_question, time_seconds)
         }
 
-        evaluation_runs_col.update_one(
-            {'_id': ObjectId(run_id)},
-            {'$set': {'status': 'done', 'results': results, 'finished_at': datetime.now(timezone.utc)}}
-        )
+        finish_run(run_id, results)
     except Exception as e:
-        evaluation_runs_col.update_one(
-            {'_id': ObjectId(run_id)},
-            {'$set': {'status': 'error', 'error': str(e), 'finished_at': datetime.now(timezone.utc)}}
-        )
+        fail_run(run_id, str(e))
     finally:
         _cleanup_eval_collection(run_id)
