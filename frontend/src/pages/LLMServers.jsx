@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApi } from '../api/useApi'
+import PasswordInput from '../components/PasswordInput'
 
 export default function LLMServers() {
   const api = useApi()
@@ -139,11 +140,10 @@ export default function LLMServers() {
             )}
 
             {type === 'gemini' && (
-              <input
+              <PasswordInput
                 value={apiKey}
                 onChange={e => setApiKey(e.target.value)}
                 placeholder="Gemini API Key"
-                type="password"
                 required
                 className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
               />
@@ -158,11 +158,10 @@ export default function LLMServers() {
                   required
                   className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
                 />
-                <input
+                <PasswordInput
                   value={apiKey}
                   onChange={e => setApiKey(e.target.value)}
                   placeholder="API Key"
-                  type="password"
                   required
                   className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
                 />
