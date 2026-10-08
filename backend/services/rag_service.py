@@ -209,7 +209,7 @@ def _build_router_engine(index, llm, top_k: int, node_postprocessors=None):
     return RouterQueryEngine(selector=LLMSingleSelector.from_defaults(llm=llm), query_engine_tools=tools, llm=llm, verbose=True)
 
 
-def _build_sub_question_engine(index, llm, top_k: int, node_postprocessors=None):
+def _build_sub_question_engine(index, llm, top_k: int, synthesis_mode: str = 'compact', node_postprocessors=None):
     """
     Descompone la pregunta en sub-preguntas (vía LLMQuestionGenerator) y responde cada una
     por separado contra el índice vectorial antes de combinar las respuestas parciales.
@@ -217,10 +217,11 @@ def _build_sub_question_engine(index, llm, top_k: int, node_postprocessors=None)
     se aplica siempre en lugar de dejar que el selector del router decida si usarla o no.
     """
     from llama_index.core.query_engine import SubQuestionQueryEngine
+    from llama_index.core import get_response_synthesizer
     from llama_index.core.question_gen import LLMQuestionGenerator
     from llama_index.core.tools import QueryEngineTool
 
-    base_engine = index.as_query_engine(similarity_top_k=top_k, response_mode='compact', llm=llm,
+    base_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode, llm=llm,
                                          node_postprocessors=node_postprocessors or [])
     return SubQuestionQueryEngine.from_defaults(
         query_engine_tools=[
@@ -230,6 +231,7 @@ def _build_sub_question_engine(index, llm, top_k: int, node_postprocessors=None)
             )
         ],
         question_gen=LLMQuestionGenerator.from_defaults(llm=llm),
+        response_synthesizer=get_response_synthesizer(response_mode=synthesis_mode, llm=llm),
         llm=llm,
         use_async=False
     )
@@ -341,13 +343,13 @@ def invalidate_derived_indexes(agent_id: str):
         pass
 
 
-def _build_bm25_engine(chroma_collection, llm, top_k: int, node_postprocessors=None):
+def _build_bm25_engine(chroma_collection, llm, top_k: int, synthesis_mode: str = 'compact', node_postprocessors=None):
     from llama_index.core.query_engine import RetrieverQueryEngine
     return RetrieverQueryEngine.from_args(_build_bm25_retriever(chroma_collection, top_k), llm=llm,
-                                           node_postprocessors=node_postprocessors or [])
+                                           response_mode=synthesis_mode, node_postprocessors=node_postprocessors or [])
 
 
-def _build_fusion_engine(index, chroma_collection, llm, top_k: int, top_q: int, node_postprocessors=None):
+def _build_fusion_engine(index, chroma_collection, llm, top_k: int, top_q: int, synthesis_mode: str = 'compact', node_postprocessors=None):
     from llama_index.core.retrievers import QueryFusionRetriever
     from llama_index.core.query_engine import RetrieverQueryEngine
 
@@ -363,7 +365,8 @@ def _build_fusion_engine(index, chroma_collection, llm, top_k: int, top_q: int, 
         use_async=False,
         verbose=True,
     )
-    return RetrieverQueryEngine.from_args(fusion_retriever, llm=llm, node_postprocessors=node_postprocessors or [])
+    return RetrieverQueryEngine.from_args(fusion_retriever, llm=llm, response_mode=synthesis_mode,
+                                           node_postprocessors=node_postprocessors or [])
 
 
 @dataclass
@@ -425,7 +428,8 @@ def _router_engine(ctx):
 
 @_register_engine('fusion')
 def _fusion_engine(ctx):
-    return _build_fusion_engine(ctx.index, ctx.chroma_collection, ctx.llm, ctx.top_k, ctx.top_q, node_postprocessors=ctx.postprocessors)
+    return _build_fusion_engine(ctx.index, ctx.chroma_collection, ctx.llm, ctx.top_k, ctx.top_q,
+                                 synthesis_mode=ctx.synthesis_mode, node_postprocessors=ctx.postprocessors)
 
 
 @_register_engine('raptor')
@@ -436,12 +440,14 @@ def _raptor_engine(ctx):
 
 @_register_engine('sub_question')
 def _sub_question_engine(ctx):
-    return _build_sub_question_engine(ctx.index, ctx.llm, ctx.top_k, node_postprocessors=ctx.postprocessors)
+    return _build_sub_question_engine(ctx.index, ctx.llm, ctx.top_k, synthesis_mode=ctx.synthesis_mode,
+                                      node_postprocessors=ctx.postprocessors)
 
 
 @_register_engine('bm25')
 def _bm25_engine(ctx):
-    return _build_bm25_engine(ctx.chroma_collection, ctx.llm, ctx.top_k, node_postprocessors=ctx.postprocessors)
+    return _build_bm25_engine(ctx.chroma_collection, ctx.llm, ctx.top_k, synthesis_mode=ctx.synthesis_mode,
+                              node_postprocessors=ctx.postprocessors)
 
 
 def _vector_engine(ctx):
