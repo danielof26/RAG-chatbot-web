@@ -11,17 +11,29 @@ export const initTechsFromMode = (catalog, mode) => {
   return t
 }
 
-// Pills selected for an agent, from its saved rag_config (mode + synthesis mode + the on/off flags)
+// Techniques that can't be picked because an already selected one is incompatible with them
+export const blockedTechsFor = (catalog, selectedTechs) => {
+  const blocked = new Set()
+  catalog.sections.forEach(s => s.techniques.forEach(t => {
+    if (selectedTechs.has(t.id)) t.incompat.forEach(id => blocked.add(id))
+  }))
+  return blocked
+}
+
+// Pills selected for an agent, from its saved rag_config (mode + synthesis mode + the on/off flags).
+// The mode is authoritative; a saved extra that a lock now forbids next to it (e.g. a synthesis mode that
+// the mode ignores) is left out instead of showing a combination the UI would never let you build.
 export const techsFromRagConfig = (catalog, ragConfig) => {
   if (!catalog) return new Set()
   const cfg = ragConfig ?? {}
   const techs = initTechsFromMode(catalog, cfg.retrieval_mode ?? 'naive')
+  const addIfAllowed = (id) => { if (!blockedTechsFor(catalog, techs).has(id)) techs.add(id) }
   const synthMode = cfg.synthesis_mode ?? 'compact'
-  if (synthMode !== 'compact') { techs.delete('compact'); techs.add(synthMode) }
-  if (cfg.sim_filter)   techs.add('sim_filter')
-  if (cfg.rerank)       techs.add('rerank_ce')
-  if (cfg.xai)          techs.add('xai')
-  if (cfg.long_reorder) techs.add('long_reorder')
+  if (synthMode !== 'compact') { techs.delete('compact'); addIfAllowed(synthMode); if (!techs.has(synthMode)) techs.add('compact') }
+  if (cfg.sim_filter)   addIfAllowed('sim_filter')
+  if (cfg.rerank)       addIfAllowed('rerank_ce')
+  if (cfg.xai)          addIfAllowed('xai')
+  if (cfg.long_reorder) addIfAllowed('long_reorder')
   return techs
 }
 
@@ -37,15 +49,6 @@ export const findTech = (catalog, techId) => {
     if (found) return found
   }
   return null
-}
-
-// Techniques that can't be picked because an already selected one is incompatible with them
-export const blockedTechsFor = (catalog, selectedTechs) => {
-  const blocked = new Set()
-  catalog.sections.forEach(s => s.techniques.forEach(t => {
-    if (selectedTechs.has(t.id)) t.incompat.forEach(id => blocked.add(id))
-  }))
-  return blocked
 }
 
 // Returns the new selection, or the same Set instance when the click does nothing
