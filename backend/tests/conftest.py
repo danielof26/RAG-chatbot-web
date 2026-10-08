@@ -46,6 +46,8 @@ class FakeCollection:
         for d in self.docs:
             if _match(d, query):
                 d.update(update.get('$set', {}))
+                for field, value in update.get('$push', {}).items():
+                    d.setdefault(field, []).append(value)
                 for field in update.get('$unset', {}):
                     d.pop(field, None)
                 return SimpleNamespace(matched_count=1, modified_count=1)
@@ -60,6 +62,11 @@ class FakeCollection:
                 self.docs.remove(d)
                 return SimpleNamespace(deleted_count=1)
         return SimpleNamespace(deleted_count=0)
+
+    def delete_many(self, query):
+        kept = [d for d in self.docs if not _match(d, query)]
+        deleted, self.docs[:] = len(self.docs) - len(kept), kept
+        return SimpleNamespace(deleted_count=deleted)
 
 
 COLLECTIONS = [n for n in dir(db) if n.endswith('_col')]
