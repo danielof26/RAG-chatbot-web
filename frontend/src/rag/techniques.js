@@ -11,6 +11,20 @@ export const initTechsFromMode = (catalog, mode) => {
   return t
 }
 
+// Pills selected for an agent, from its saved rag_config (mode + synthesis mode + the on/off flags)
+export const techsFromRagConfig = (catalog, ragConfig) => {
+  if (!catalog) return new Set()
+  const cfg = ragConfig ?? {}
+  const techs = initTechsFromMode(catalog, cfg.retrieval_mode ?? 'naive')
+  const synthMode = cfg.synthesis_mode ?? 'compact'
+  if (synthMode !== 'compact') { techs.delete('compact'); techs.add(synthMode) }
+  if (cfg.sim_filter)   techs.add('sim_filter')
+  if (cfg.rerank)       techs.add('rerank_ce')
+  if (cfg.xai)          techs.add('xai')
+  if (cfg.long_reorder) techs.add('long_reorder')
+  return techs
+}
+
 export const computeRetrievalMode = (catalog, techs) =>
   catalog.mode_priority.find(mode => techs.has(mode)) ?? 'naive'
 
