@@ -6,6 +6,7 @@ from llama_index.core.postprocessor import SentenceTransformerRerank
 from llama_index.core.postprocessor import LongContextReorder
 from llama_index.llms.ollama import Ollama
 import copy
+from pathlib import Path
 import threading
 from dataclasses import dataclass, field
 import chromadb
@@ -584,7 +585,8 @@ def delete_document_vectors(agent_id: str, file_path: str):
     """
     chroma_collection, _, _ = _get_chroma_store(agent_id)
     try:
-        chroma_collection.delete(where={'file_path': file_path})
+        # The reader stores the normalized path ("uploads/x"); Mongo keeps "./uploads/x", which would match nothing
+        chroma_collection.delete(where={'file_path': str(Path(file_path))})
     except Exception:
         pass
     invalidate_derived_indexes(agent_id)

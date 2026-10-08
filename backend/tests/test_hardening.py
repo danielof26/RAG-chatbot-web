@@ -237,3 +237,21 @@ def test_evaluations_run_in_parallel_up_to_the_limit(monkeypatch):
     [t.start() for t in threads]
     [t.join() for t in threads]
     assert peak == ev.MAX_CONCURRENT_EVALUATIONS > 1
+
+
+# ─── vector deletion ─────────────────────────────────────
+
+def test_deleting_a_document_removes_its_chunks_even_if_the_stored_path_has_a_dot_slash(monkeypatch):
+    """Chroma keeps the reader's normalized path ('uploads/a/x.txt'); Mongo keeps './uploads/a/x.txt'."""
+    import chromadb
+    from services import rag_service
+    collection = chromadb.EphemeralClient().get_or_create_collection('delete_test')
+    collection.add(ids=['1', '2', '3'], documents=['a', 'b', 'c'], embeddings=[[1.0], [1.0], [1.0]],
+                   metadatas=[{'file_path': 'uploads/a/x.txt'}, {'file_path': 'uploads/a/x.txt'},
+                              {'file_path': 'uploads/a/y.txt'}])
+    monkeypatch.setattr(rag_service, '_get_chroma_store', lambda agent_id: (collection, None, None))
+    monkeypatch.setattr(rag_service, 'invalidate_derived_indexes', lambda agent_id: None)
+
+    rag_service.delete_document_vectors('a', './uploads/a/x.txt')
+
+    assert collection.get()['ids'] == ['3']
