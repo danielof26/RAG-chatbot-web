@@ -1,4 +1,5 @@
 from llama_index.core import VectorStoreIndex, Settings, SimpleDirectoryReader, StorageContext
+from llama_index.core.indices.prompt_helper import ChatPromptHelper, PromptHelper
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.postprocessor import SimilarityPostprocessor
 from llama_index.core.postprocessor import SentenceTransformerRerank
@@ -8,9 +9,16 @@ from dataclasses import dataclass, field
 import chromadb
 from llama_index.vector_stores.chroma import ChromaVectorStore
 import config
-from services.llm_providers import get_provider
+from services.llm_providers import CONTEXT_WINDOW, get_provider
 from services.query_strategies import get_query_strategy
 from services.rag_config import RagConfig
+
+
+# LlamaIndex sizes prompt packing from the *global* Settings.llm when building any response synthesizer.
+# Per-request models are passed explicitly (see RagContext), so Settings.llm is never set; without these
+# process-wide constants it would silently fall back to a 3900-token window instead of CONTEXT_WINDOW.
+Settings.prompt_helper = PromptHelper(context_window=CONTEXT_WINDOW)
+Settings.chat_prompt_helper = ChatPromptHelper(context_window=CONTEXT_WINDOW)
 
 
 def _condense_question(question: str, chat_history: list, llm) -> str:
@@ -58,7 +66,15 @@ def _resolve_embed_server(agent_config: dict):
         return None
 
 
-def _setup_settings(agent_config: dict):
+@dataclass(frozen=True)
+class RagContext:
+    """Per-request models. Passed explicitly everywhere instead of the process-global llama_index Settings,
+    so concurrent requests of agents with different models cannot overwrite each other."""
+    llm: object
+    embed_model: object
+
+
+def _build_context(agent_config: dict) -> RagContext:
     llm_model     = agent_config.get('llm_model', config.DEFAULT_LLM)
     embed_model   = agent_config.get('embed_model', config.DEFAULT_EMBED_MODEL)
     system_prompt = agent_config.get('prompt', '')
@@ -67,13 +83,13 @@ def _setup_settings(agent_config: dict):
     server = _resolve_server(agent_config)
     if server:
         provider = get_provider(server)
-        Settings.llm = provider.build_llm(model=llm_model, system_prompt=system_prompt, temperature=temperature)
+        llm = provider.build_llm(model=llm_model, system_prompt=system_prompt, temperature=temperature)
     else:
-        Settings.llm = Ollama(
+        llm = Ollama(
             model=llm_model,
             request_timeout=600.0,
             system_prompt=system_prompt or None,
-            context_window=8000,
+            context_window=CONTEXT_WINDOW,
             temperature=temperature
         )
 
@@ -85,7 +101,7 @@ def _setup_settings(agent_config: dict):
         )
 
     embed_provider = get_provider(embed_server)
-    Settings.embed_model = embed_provider.build_embedding(embed_model)
+    return RagContext(llm=llm, embed_model=embed_provider.build_embedding(embed_model))
 
 
 def _get_chroma_store(agent_id: str):
@@ -104,7 +120,7 @@ def index_document(agent_id: str, file_path: str, embed_model: str = None, embed
     Indexa un documento en la colección ChromaDB del agente.
     Se puede llamar varias veces para añadir más documentos.
     """
-    _setup_settings({
+    models = _build_context({
         'embed_model': embed_model or config.DEFAULT_EMBED_MODEL,
         'embed_server_id': embed_server_id
     })
@@ -120,7 +136,8 @@ def index_document(agent_id: str, file_path: str, embed_model: str = None, embed
     VectorStoreIndex.from_documents(
         documents,
         storage_context=storage_context,
-        transformations=[splitter]
+        transformations=[splitter],
+        embed_model=models.embed_model
     )
 
 
@@ -130,7 +147,7 @@ def _build_router_engine(index, llm, top_k: int, node_postprocessors=None):
     from llama_index.core.tools import QueryEngineTool
 
     node_postprocessors = node_postprocessors or []
-    engine_simple = index.as_query_engine(similarity_top_k=top_k, response_mode='compact',
+    engine_simple = index.as_query_engine(similarity_top_k=top_k, response_mode='compact', llm=llm,
                                            node_postprocessors=node_postprocessors)
 
     from llama_index.core.question_gen import LLMQuestionGenerator
@@ -141,11 +158,12 @@ def _build_router_engine(index, llm, top_k: int, node_postprocessors=None):
                 description="Useful for answering questions about the documents"
             )
         ],
-        question_gen=LLMQuestionGenerator.from_defaults(),
+        question_gen=LLMQuestionGenerator.from_defaults(llm=llm),
+        llm=llm,
         use_async=False
     )
 
-    engine_summary = index.as_query_engine(similarity_top_k=top_k * 3, response_mode='tree_summarize',
+    engine_summary = index.as_query_engine(similarity_top_k=top_k * 3, response_mode='tree_summarize', llm=llm,
                                             node_postprocessors=node_postprocessors)
 
     class _OODEngine(CustomQueryEngine):
@@ -183,10 +201,10 @@ def _build_router_engine(index, llm, top_k: int, node_postprocessors=None):
         ),
     ]
 
-    return RouterQueryEngine(selector=LLMSingleSelector.from_defaults(), query_engine_tools=tools, verbose=True)
+    return RouterQueryEngine(selector=LLMSingleSelector.from_defaults(llm=llm), query_engine_tools=tools, llm=llm, verbose=True)
 
 
-def _build_sub_question_engine(index, top_k: int, node_postprocessors=None):
+def _build_sub_question_engine(index, llm, top_k: int, node_postprocessors=None):
     """
     Descompone la pregunta en sub-preguntas (vía LLMQuestionGenerator) y responde cada una
     por separado contra el índice vectorial antes de combinar las respuestas parciales.
@@ -197,7 +215,7 @@ def _build_sub_question_engine(index, top_k: int, node_postprocessors=None):
     from llama_index.core.question_gen import LLMQuestionGenerator
     from llama_index.core.tools import QueryEngineTool
 
-    base_engine = index.as_query_engine(similarity_top_k=top_k, response_mode='compact',
+    base_engine = index.as_query_engine(similarity_top_k=top_k, response_mode='compact', llm=llm,
                                          node_postprocessors=node_postprocessors or [])
     return SubQuestionQueryEngine.from_defaults(
         query_engine_tools=[
@@ -206,7 +224,8 @@ def _build_sub_question_engine(index, top_k: int, node_postprocessors=None):
                 description="Useful for answering questions about the documents"
             )
         ],
-        question_gen=LLMQuestionGenerator.from_defaults(),
+        question_gen=LLMQuestionGenerator.from_defaults(llm=llm),
+        llm=llm,
         use_async=False
     )
 
@@ -224,7 +243,7 @@ def _clean_chroma_metadata(meta: dict) -> dict:
     return {k: v for k, v in (meta or {}).items() if k not in _CHROMA_INTERNAL_METADATA_KEYS}
 
 
-def _build_raptor_engine(collection_key: str, chroma_collection, top_k: int, synthesis_mode: str, node_postprocessors=None):
+def _build_raptor_engine(collection_key: str, chroma_collection, llm, embed_model, top_k: int, synthesis_mode: str, node_postprocessors=None):
     """
     collection_key identifies the RAPTOR tree's own ChromaDB collection (separate from the
     base vector index). The chat path uses "agent_{agent_id}" and the evaluation path uses
@@ -251,15 +270,15 @@ def _build_raptor_engine(collection_key: str, chroma_collection, top_k: int, syn
 
     retriever = RaptorRetriever(
         documents,
-        embed_model=Settings.embed_model,
-        llm=Settings.llm,
+        embed_model=embed_model,
+        llm=llm,
         vector_store=raptor_vector_store,
         similarity_top_k=top_k,
         tree_depth=2,
         mode="collapsed",
     )
 
-    return RetrieverQueryEngine.from_args(retriever, response_mode=synthesis_mode,
+    return RetrieverQueryEngine.from_args(retriever, llm=llm, response_mode=synthesis_mode,
                                            node_postprocessors=node_postprocessors or [])
 
 
@@ -278,13 +297,13 @@ def _build_bm25_retriever(chroma_collection, top_k: int):
     return BM25Retriever.from_defaults(nodes=nodes, similarity_top_k=top_k)
 
 
-def _build_bm25_engine(chroma_collection, top_k: int, node_postprocessors=None):
+def _build_bm25_engine(chroma_collection, llm, top_k: int, node_postprocessors=None):
     from llama_index.core.query_engine import RetrieverQueryEngine
-    return RetrieverQueryEngine.from_args(_build_bm25_retriever(chroma_collection, top_k),
+    return RetrieverQueryEngine.from_args(_build_bm25_retriever(chroma_collection, top_k), llm=llm,
                                            node_postprocessors=node_postprocessors or [])
 
 
-def _build_fusion_engine(index, chroma_collection, top_k: int, top_q: int, node_postprocessors=None):
+def _build_fusion_engine(index, chroma_collection, llm, top_k: int, top_q: int, node_postprocessors=None):
     from llama_index.core.retrievers import QueryFusionRetriever
     from llama_index.core.query_engine import RetrieverQueryEngine
 
@@ -293,13 +312,14 @@ def _build_fusion_engine(index, chroma_collection, top_k: int, top_q: int, node_
 
     fusion_retriever = QueryFusionRetriever(
         [vector_retriever, bm25_retriever],
+        llm=llm,
         similarity_top_k=top_k,
         num_queries=top_q,
         mode="reciprocal_rerank",
         use_async=False,
         verbose=True,
     )
-    return RetrieverQueryEngine.from_args(fusion_retriever, node_postprocessors=node_postprocessors or [])
+    return RetrieverQueryEngine.from_args(fusion_retriever, llm=llm, node_postprocessors=node_postprocessors or [])
 
 
 @dataclass
@@ -308,6 +328,7 @@ class EngineContext:
     index: object
     chroma_collection: object
     llm: object
+    embed_model: object
     collection_key: str          # "agent_{id}" in chat, "eval_{run_id}" in evaluation (names the RAPTOR tree)
     top_k: int = 5
     top_q: int = 1               # fusion_num_queries
@@ -346,27 +367,27 @@ def _router_engine(ctx):
 
 @_register_engine('fusion')
 def _fusion_engine(ctx):
-    return _build_fusion_engine(ctx.index, ctx.chroma_collection, ctx.top_k, ctx.top_q, node_postprocessors=ctx.postprocessors)
+    return _build_fusion_engine(ctx.index, ctx.chroma_collection, ctx.llm, ctx.top_k, ctx.top_q, node_postprocessors=ctx.postprocessors)
 
 
 @_register_engine('raptor')
 def _raptor_engine(ctx):
-    return _build_raptor_engine(ctx.collection_key, ctx.chroma_collection, ctx.top_k, ctx.synthesis_mode,
+    return _build_raptor_engine(ctx.collection_key, ctx.chroma_collection, ctx.llm, ctx.embed_model, ctx.top_k, ctx.synthesis_mode,
                                 node_postprocessors=ctx.postprocessors)
 
 
 @_register_engine('sub_question')
 def _sub_question_engine(ctx):
-    return _build_sub_question_engine(ctx.index, ctx.top_k, node_postprocessors=ctx.postprocessors)
+    return _build_sub_question_engine(ctx.index, ctx.llm, ctx.top_k, node_postprocessors=ctx.postprocessors)
 
 
 @_register_engine('bm25')
 def _bm25_engine(ctx):
-    return _build_bm25_engine(ctx.chroma_collection, ctx.top_k, node_postprocessors=ctx.postprocessors)
+    return _build_bm25_engine(ctx.chroma_collection, ctx.llm, ctx.top_k, node_postprocessors=ctx.postprocessors)
 
 
 def _vector_engine(ctx):
-    return ctx.index.as_query_engine(similarity_top_k=ctx.top_k, response_mode=ctx.synthesis_mode,
+    return ctx.index.as_query_engine(similarity_top_k=ctx.top_k, response_mode=ctx.synthesis_mode, llm=ctx.llm,
                                      node_postprocessors=ctx.postprocessors, streaming=ctx.streaming)
 
 
@@ -384,7 +405,7 @@ def query_agent(agent_id: str, question: str, agent_config: dict, chat_history: 
     Hace una pregunta al RAG del agente y devuelve la respuesta.
     Si el agente no tiene documentos, avisa al usuario.
     """
-    _setup_settings(agent_config)
+    models = _build_context(agent_config)
 
     chroma_collection, vector_store, storage_context = _get_chroma_store(agent_id)
 
@@ -400,7 +421,7 @@ def query_agent(agent_id: str, question: str, agent_config: dict, chat_history: 
     if rag_config.conv_memory and chat_history:
         conv_mode = rag_config.conv_memory_mode
         if conv_mode == 'condense':
-            effective_question = _condense_question(question, chat_history, Settings.llm)
+            effective_question = _condense_question(question, chat_history, models.llm)
         else:  # simple: include history in synthesis prompt, keep original for retrieval
             history_lines = '\n'.join(
                 f"{'Human' if m['role'] == 'user' else 'Assistant'}: {m['content']}"
@@ -411,9 +432,9 @@ def query_agent(agent_id: str, question: str, agent_config: dict, chat_history: 
                 f"Current question: {question}"
             )
 
-    index = VectorStoreIndex.from_vector_store(vector_store, storage_context=storage_context)
+    index = VectorStoreIndex.from_vector_store(vector_store, embed_model=models.embed_model, storage_context=storage_context)
     ctx = EngineContext(
-        index=index, chroma_collection=chroma_collection, llm=Settings.llm,
+        index=index, chroma_collection=chroma_collection, llm=models.llm, embed_model=models.embed_model,
         collection_key=f"agent_{agent_id}",
         top_k=rag_config.similarity_top_k, top_q=rag_config.fusion_num_queries,
         synthesis_mode=rag_config.synthesis_mode,
@@ -423,7 +444,7 @@ def query_agent(agent_id: str, question: str, agent_config: dict, chat_history: 
     )
     query_engine = build_query_engine(retrieval_mode, ctx)
     strategy = get_query_strategy(retrieval_mode)
-    answer, _ = strategy.execute(query_engine, effective_question, Settings.llm, synthesis_question=synthesis_question)
+    answer, _ = strategy.execute(query_engine, effective_question, models.llm, synthesis_question=synthesis_question)
     if not answer or not answer.strip():
         answer = "I could not find relevant information in the documents to answer this question."
     return answer
@@ -434,7 +455,7 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict, chat_hi
     Generador que cede tokens uno a uno para modo streaming.
     El caller itera sobre él para construir la respuesta progresivamente.
     """
-    _setup_settings(agent_config)
+    models = _build_context(agent_config)
 
     chroma_collection, vector_store, storage_context = _get_chroma_store(agent_id)
 
@@ -451,7 +472,7 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict, chat_hi
     if rag_config.conv_memory and chat_history:
         conv_mode = rag_config.conv_memory_mode
         if conv_mode == 'condense':
-            effective_question = _condense_question(question, chat_history, Settings.llm)
+            effective_question = _condense_question(question, chat_history, models.llm)
         else:
             history_lines = '\n'.join(
                 f"{'Human' if m['role'] == 'user' else 'Assistant'}: {m['content']}"
@@ -462,9 +483,9 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict, chat_hi
                 f"Current question: {question}"
             )
 
-    index = VectorStoreIndex.from_vector_store(vector_store, storage_context=storage_context)
+    index = VectorStoreIndex.from_vector_store(vector_store, embed_model=models.embed_model, storage_context=storage_context)
     ctx = EngineContext(
-        index=index, chroma_collection=chroma_collection, llm=Settings.llm,
+        index=index, chroma_collection=chroma_collection, llm=models.llm, embed_model=models.embed_model,
         collection_key=f"agent_{agent_id}",
         top_k=rag_config.similarity_top_k, top_q=rag_config.fusion_num_queries,
         synthesis_mode=rag_config.synthesis_mode,
@@ -475,12 +496,12 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict, chat_hi
     query_engine = build_query_engine(retrieval_mode, ctx)
     strategy = get_query_strategy(retrieval_mode)
     if retrieval_mode in NON_STREAMING_MODES:
-        answer, _ = strategy.execute(query_engine, effective_question, Settings.llm, synthesis_question=synthesis_question)
+        answer, _ = strategy.execute(query_engine, effective_question, models.llm, synthesis_question=synthesis_question)
         for word in answer.split(' '):
             yield word + ' '
     else:
         q = synthesis_question or effective_question
-        query = strategy.build_query(effective_question, Settings.llm)
+        query = strategy.build_query(effective_question, models.llm)
         from llama_index.core import QueryBundle
         if isinstance(query, QueryBundle):
             query = QueryBundle(query_str=q, custom_embedding_strs=query.custom_embedding_strs)

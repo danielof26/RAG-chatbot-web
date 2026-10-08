@@ -1,6 +1,6 @@
 import re
 import chromadb
-from llama_index.core import VectorStoreIndex, Settings, SimpleDirectoryReader, StorageContext
+from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, StorageContext
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from services.query_strategies import get_query_strategy, _clean_answer
@@ -21,8 +21,7 @@ def setup_rag(llm_provider, embed_provider, model_name, embed_model, file_paths,
     """
     llm = llm_provider.build_llm(model=model_name, system_prompt=prompt, temperature=temperature)
 
-    Settings.embed_model = embed_provider.build_embedding(model=embed_model)
-    Settings.llm = llm
+    embedder = embed_provider.build_embedding(model=embed_model)
 
     db                = chromadb.PersistentClient(path=chroma_path)
     chroma_collection = db.get_or_create_collection(chroma_col)
@@ -32,12 +31,12 @@ def setup_rag(llm_provider, embed_provider, model_name, embed_model, file_paths,
     if chroma_collection.count() == 0:
         documents = SimpleDirectoryReader(input_files=file_paths).load_data()
         splitter  = SentenceSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-        index = VectorStoreIndex.from_documents(documents, storage_context=storage_context, transformations=[splitter])
+        index = VectorStoreIndex.from_documents(documents, storage_context=storage_context, transformations=[splitter], embed_model=embedder)
     else:
-        index = VectorStoreIndex.from_vector_store(vector_store, storage_context=storage_context)
+        index = VectorStoreIndex.from_vector_store(vector_store, embed_model=embedder, storage_context=storage_context)
 
     ctx = EngineContext(
-        index=index, chroma_collection=chroma_collection, llm=llm, collection_key=chroma_col,
+        index=index, chroma_collection=chroma_collection, llm=llm, embed_model=embedder, collection_key=chroma_col,
         top_k=top_k, top_q=fusion_num_queries, synthesis_mode=synthesis_mode,
         postprocessors=build_postprocessors(similarity_cutoff, rerank, rerank_top_n, long_reorder),
     )

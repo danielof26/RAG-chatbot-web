@@ -6,6 +6,8 @@ from llama_index.core.bridge.pydantic import PrivateAttr
 from llama_index.core.embeddings import BaseEmbedding
 from llama_index.llms.ollama import Ollama
 
+CONTEXT_WINDOW = 8000  # tokens, for the Ollama and OpenAI-like LLMs
+
 
 class _FlexOpenAIEmbedding(BaseEmbedding):
     """Embedding for OpenAI-compatible APIs — accepts any model name without validation."""
@@ -72,7 +74,7 @@ class OllamaProvider(LLMProvider):
             base_url=self.base_url,
             request_timeout=600.0,
             system_prompt=system_prompt or None,
-            context_window=8000,
+            context_window=CONTEXT_WINDOW,
             temperature=temperature if temperature is not None else 0.1
         )
 
@@ -140,7 +142,7 @@ class OpenAILikeProvider(LLMProvider):
             temperature=temperature if temperature is not None else 0.1,
             system_prompt=system_prompt or None,
             is_chat_model=True,
-            context_window=8000,
+            context_window=CONTEXT_WINDOW,
             timeout=600,
         )
 
