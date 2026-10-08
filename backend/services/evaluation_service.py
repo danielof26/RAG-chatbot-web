@@ -1,6 +1,7 @@
 import csv
 import io
 import statistics
+import threading
 import time
 
 import spacy
@@ -15,12 +16,20 @@ from services.llm_providers import OllamaProvider, get_provider
 from services.rag_engine import run_rag, setup_rag
 from services.job_state import fail_run, finish_run
 from services.rag_service import invalidate_bm25_cache
+from upload_policy import MAX_DATASET_BYTES, MAX_DATASET_QUESTIONS
+
+# Runs in parallel (the spaCy and BERTScore models are loaded once and shared). More than this would
+# compete for the LLM server and memory, so extra runs wait their turn.
+MAX_CONCURRENT_EVALUATIONS = 3
 
 _NLP_MODELS = {
     'es': 'es_core_news_sm',
     'en': 'en_core_web_sm',
 }
+SUPPORTED_LANGUAGES = tuple(_NLP_MODELS)
 _nlp_cache = {}
+_model_lock = threading.Lock()      # model loading is lazy; two runs must not load the same heavy model twice
+_evaluation_slots = threading.BoundedSemaphore(MAX_CONCURRENT_EVALUATIONS)
 _rouge_scorer = rouge_lib.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=False)
 _stemmers = {
     'es': SnowballStemmer('spanish'),
@@ -30,9 +39,10 @@ _bert_scorers = {}
 
 
 def _get_nlp(language: str):
-    if language not in _nlp_cache:
-        _nlp_cache[language] = spacy.load(_NLP_MODELS.get(language, _NLP_MODELS['en']))
-    return _nlp_cache[language]
+    with _model_lock:
+        if language not in _nlp_cache:
+            _nlp_cache[language] = spacy.load(_NLP_MODELS.get(language, _NLP_MODELS['en']))
+        return _nlp_cache[language]
 
 
 def semantics(text: str, nlp) -> list:
@@ -65,10 +75,12 @@ def compute_rouge(generated: str, reference: str) -> dict:
 def compute_bertscore(generated: str, reference: str, lang: str = 'es') -> float | None:
     """Computes BERTScore F1 between a generated and a reference answer using contextual embeddings."""
     try:
-        if lang not in _bert_scorers:
-            from bert_score import BERTScorer
-            _bert_scorers[lang] = BERTScorer(model_type="xlm-roberta-large", num_layers=17, rescale_with_baseline=False)
-        _, _, F1 = _bert_scorers[lang].score([generated], [reference])
+        with _model_lock:
+            if lang not in _bert_scorers:
+                from bert_score import BERTScorer
+                _bert_scorers[lang] = BERTScorer(model_type="xlm-roberta-large", num_layers=17, rescale_with_baseline=False)
+            scorer = _bert_scorers[lang]
+        _, _, F1 = scorer.score([generated], [reference])
         return round(float(F1[0]), 4)
     except Exception as e:
         print(f"[BERTScore ERROR] {e}")
@@ -77,15 +89,25 @@ def compute_bertscore(generated: str, reference: str, lang: str = 'es') -> float
 
 def parse_questions_csv(file_bytes: bytes) -> list:
     """Parses an uploaded CSV (Question;Keywords;Answer) into a list of question dicts."""
+    if len(file_bytes) > MAX_DATASET_BYTES:
+        raise ValueError(f'the file is larger than {MAX_DATASET_BYTES // 1024} KB')
     text = file_bytes.decode('utf-8-sig')
     reader = csv.DictReader(io.StringIO(text), delimiter=';')
+    missing = {'Question', 'Keywords'} - set(reader.fieldnames or [])
+    if missing:
+        raise ValueError(f'missing column(s): {", ".join(sorted(missing))}. Expected: Question;Keywords;Answer')
     questions = []
-    for row in reader:
-        questions.append({
-            'question': row['Question'].strip(),
-            'keywords': row['Keywords'].strip(),
-            'reference_answer': row.get('Answer', '').strip()
-        })
+    try:
+        for row in reader:
+            questions.append({
+                'question': (row['Question'] or '').strip(),
+                'keywords': (row['Keywords'] or '').strip(),
+                'reference_answer': (row.get('Answer') or '').strip()
+            })
+    except csv.Error as e:
+        raise ValueError(str(e)) from e
+    if len(questions) > MAX_DATASET_QUESTIONS:
+        raise ValueError(f'more than {MAX_DATASET_QUESTIONS} questions')
     return questions
 
 
@@ -263,6 +285,12 @@ def run_evaluation(run_id: str):
     if not run:
         return
 
+    _update_progress(run_id, {'phase': 'queued'})
+    with _evaluation_slots:
+        _run_evaluation_now(run_id, run)
+
+
+def _run_evaluation_now(run_id: str, run: dict):
     try:
         agent, snapshot, file_paths = _load_run_inputs(run)
         nlp = _get_nlp(run['language'])

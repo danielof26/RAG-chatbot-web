@@ -276,9 +276,9 @@ export default function EvaluationTab({ id, api, active }) {
                     </p>
                     {r.status === 'running' && r.progress && (
                       <p className="text-xs text-orange-500 mt-1 animate-pulse">
-                        {r.progress.phase === 'indexing'
-                          ? 'Indexing documents...'
-                          : `Step ${r.progress.step}/${r.progress.total} — question ${r.progress.question_num}/${r.progress.n_questions}, run ${r.progress.exec_num}/${r.progress.n_exec}: "${r.progress.question}"`}
+                        {r.progress.phase === 'queued' && 'Waiting for another evaluation to finish...'}
+                        {r.progress.phase === 'indexing' && 'Indexing documents...'}
+                        {r.progress.phase === 'querying' && `Step ${r.progress.step}/${r.progress.total} — question ${r.progress.question_num}/${r.progress.n_questions}, run ${r.progress.exec_num}/${r.progress.n_exec}: "${r.progress.question}"`}
                       </p>
                     )}
                   </button>

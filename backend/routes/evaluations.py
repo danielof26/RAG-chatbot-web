@@ -9,7 +9,8 @@ from middleware.agent_middleware import INVALID_ID, with_agent
 from middleware.auth_middleware import token_required
 from services.rag_config import RagConfig
 from states import RunStatus
-from services.evaluation_service import parse_questions_csv, run_evaluation
+from services.evaluation_service import SUPPORTED_LANGUAGES, parse_questions_csv, run_evaluation
+from upload_policy import MAX_DATASET_BYTES, MAX_EVALUATION_EXECUTIONS
 
 evaluations_bp = Blueprint('evaluations', __name__)
 
@@ -105,20 +106,24 @@ def create_evaluation(agent_id, agent):
         return jsonify({'error': 'No dataset file has been uploaded'}), 400
 
     try:
-        dataset = parse_questions_csv(request.files['file'].read())
-    except Exception as e:
-        return jsonify({'error': f'Could not parse the CSV file: {str(e)}'}), 400
+        dataset = parse_questions_csv(request.files['file'].read(MAX_DATASET_BYTES + 1))
+    except ValueError as e:
+        return jsonify({'error': f'Could not parse the CSV file: {e}'}), 400
 
     if not dataset:
         return jsonify({'error': 'The CSV file has no questions'}), 400
 
     language = request.form.get('language', 'en').strip()
+    if language not in SUPPORTED_LANGUAGES:
+        return jsonify({'error': f'language must be one of: {", ".join(SUPPORTED_LANGUAGES)}'}), 400
     rag_config = RagConfig.from_dict(snapshot.get('rag_config'))
     xai = bool(rag_config.xai)
     try:
-        n_exec = max(1, int(request.form.get('n_exec', 1)))
+        n_exec = int(request.form.get('n_exec', 1))
     except ValueError:
-        n_exec = 1
+        n_exec = 0
+    if not 1 <= n_exec <= MAX_EVALUATION_EXECUTIONS:
+        return jsonify({'error': f'n_exec must be an integer between 1 and {MAX_EVALUATION_EXECUTIONS}'}), 400
 
     run = {
         'agent_id': agent_id,
