@@ -5,6 +5,7 @@ import os
 import threading
 import traceback
 from db import agents_col, chat_messages_col
+from services.rag_config import RagConfig
 from middleware.auth_middleware import token_required, api_key_error
 from services.rag_service import index_document, query_agent, delete_agent_collection, delete_document_vectors
 import config
@@ -330,10 +331,10 @@ def chat(agent_id):
         return jsonify({'error': 'Question is mandatory'}), 400
 
     # Fetch conversation history for memory-aware retrieval
-    rag_config = agent.get('rag_config', {})
+    rag_config = RagConfig.from_dict(agent.get('rag_config'))
     chat_history = None
-    if rag_config.get('conv_memory', False):
-        turns = int(rag_config.get('conv_memory_turns', 3))
+    if rag_config.conv_memory:
+        turns = int(rag_config.conv_memory_turns)
         recent = list(chat_messages_col.find(
             {'agent_id': agent_id, 'user_id': request.user_id}
         ).sort('created_at', -1).limit(turns * 2))

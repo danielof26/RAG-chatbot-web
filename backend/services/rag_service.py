@@ -9,6 +9,7 @@ from llama_index.vector_stores.chroma import ChromaVectorStore
 import config
 from services.llm_providers import get_provider
 from services.query_strategies import get_query_strategy
+from services.rag_config import RagConfig
 
 
 def _condense_question(question: str, chat_history: list, llm) -> str:
@@ -60,7 +61,7 @@ def _setup_settings(agent_config: dict):
     llm_model     = agent_config.get('llm_model', config.DEFAULT_LLM)
     embed_model   = agent_config.get('embed_model', config.DEFAULT_EMBED_MODEL)
     system_prompt = agent_config.get('prompt', '')
-    temperature   = agent_config.get('rag_config', {}).get('temperature', 0.1)
+    temperature   = RagConfig.from_dict(agent_config.get('rag_config')).temperature
 
     server = _resolve_server(agent_config)
     if server:
@@ -312,20 +313,20 @@ def query_agent(agent_id: str, question: str, agent_config: dict, chat_history: 
     if chroma_collection.count() == 0:
         return "This agent has no knowledge documents yet. Upload a document first."
 
-    rag_config = agent_config.get('rag_config', {})
-    top_k              = rag_config.get('similarity_top_k', 5)
-    top_q              = rag_config.get('fusion_num_queries', 1)
-    retrieval_mode     = rag_config.get('retrieval_mode', 'naive')
-    synthesis_mode     = rag_config.get('synthesis_mode', 'compact')
-    similarity_cutoff  = rag_config.get('similarity_cutoff') if rag_config.get('sim_filter') else None
-    rerank             = rag_config.get('rerank', False)
-    long_reorder       = rag_config.get('long_reorder', False)
+    rag_config = RagConfig.from_dict(agent_config.get('rag_config'))
+    top_k              = rag_config.similarity_top_k
+    top_q              = rag_config.fusion_num_queries
+    retrieval_mode     = rag_config.retrieval_mode
+    synthesis_mode     = rag_config.synthesis_mode
+    similarity_cutoff  = rag_config.effective_cutoff
+    rerank             = rag_config.rerank
+    long_reorder       = rag_config.long_reorder
 
     # Conversational memory: reformulate question or build synthesis context
     effective_question = question
     synthesis_question = None
-    if rag_config.get('conv_memory', False) and chat_history:
-        conv_mode = rag_config.get('conv_memory_mode', 'simple')
+    if rag_config.conv_memory and chat_history:
+        conv_mode = rag_config.conv_memory_mode
         if conv_mode == 'condense':
             effective_question = _condense_question(question, chat_history, Settings.llm)
         else:  # simple: include history in synthesis prompt, keep original for retrieval
@@ -343,7 +344,7 @@ def query_agent(agent_id: str, question: str, agent_config: dict, chat_history: 
     if similarity_cutoff:
         postprocessors.append(SimilarityPostprocessor(similarity_cutoff=similarity_cutoff))
     if rerank:
-        postprocessors.append(SentenceTransformerRerank(model='cross-encoder/ms-marco-MiniLM-L-6-v2', top_n=rag_config.get('rerank_top_n', 3)))
+        postprocessors.append(SentenceTransformerRerank(model='cross-encoder/ms-marco-MiniLM-L-6-v2', top_n=rag_config.rerank_top_n))
     if long_reorder:
         postprocessors.append(LongContextReorder())
     if retrieval_mode == 'router':
@@ -379,20 +380,20 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict, chat_hi
         yield "This agent has no knowledge documents yet. Upload a document first."
         return
 
-    rag_config = agent_config.get('rag_config', {})
-    top_k              = rag_config.get('similarity_top_k', 5)
-    top_q              = rag_config.get('fusion_num_queries', 1)
-    retrieval_mode     = rag_config.get('retrieval_mode', 'naive')
-    synthesis_mode     = rag_config.get('synthesis_mode', 'compact')
-    similarity_cutoff  = rag_config.get('similarity_cutoff') if rag_config.get('sim_filter') else None
-    rerank             = rag_config.get('rerank', False)
-    long_reorder       = rag_config.get('long_reorder', False)
+    rag_config = RagConfig.from_dict(agent_config.get('rag_config'))
+    top_k              = rag_config.similarity_top_k
+    top_q              = rag_config.fusion_num_queries
+    retrieval_mode     = rag_config.retrieval_mode
+    synthesis_mode     = rag_config.synthesis_mode
+    similarity_cutoff  = rag_config.effective_cutoff
+    rerank             = rag_config.rerank
+    long_reorder       = rag_config.long_reorder
 
     # Conversational memory
     effective_question = question
     synthesis_question = None
-    if rag_config.get('conv_memory', False) and chat_history:
-        conv_mode = rag_config.get('conv_memory_mode', 'simple')
+    if rag_config.conv_memory and chat_history:
+        conv_mode = rag_config.conv_memory_mode
         if conv_mode == 'condense':
             effective_question = _condense_question(question, chat_history, Settings.llm)
         else:
@@ -410,7 +411,7 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict, chat_hi
     if similarity_cutoff:
         postprocessors.append(SimilarityPostprocessor(similarity_cutoff=similarity_cutoff))
     if rerank:
-        postprocessors.append(SentenceTransformerRerank(model='cross-encoder/ms-marco-MiniLM-L-6-v2', top_n=rag_config.get('rerank_top_n', 3)))
+        postprocessors.append(SentenceTransformerRerank(model='cross-encoder/ms-marco-MiniLM-L-6-v2', top_n=rag_config.rerank_top_n))
     if long_reorder:
         postprocessors.append(LongContextReorder())
     if retrieval_mode == 'router':

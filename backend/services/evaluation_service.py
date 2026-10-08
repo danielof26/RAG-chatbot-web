@@ -11,6 +11,7 @@ from rouge_score import rouge_scorer as rouge_lib
 
 import config
 from db import agents_col, config_snapshots_col, evaluation_runs_col, llm_servers_col
+from services.rag_config import RagConfig
 from services.llm_providers import OllamaProvider, get_provider
 from services.rag_engine import run_rag, setup_rag
 
@@ -136,7 +137,7 @@ def _update_progress(run_id: str, progress: dict):
 
 def _build_query_engine(run_id: str, agent: dict, snapshot: dict, file_paths: list):
     _update_progress(run_id, {'phase': 'indexing'})
-    rag_config = snapshot.get('rag_config', {})
+    rag_config = RagConfig.from_dict(snapshot.get('rag_config'))
     return setup_rag(
         llm_provider=_resolve_llm_provider(snapshot),
         embed_provider=_resolve_embed_provider(snapshot),
@@ -146,17 +147,17 @@ def _build_query_engine(run_id: str, agent: dict, snapshot: dict, file_paths: li
         chroma_path=config.CHROMA_PATH,
         chroma_col=f'eval_{run_id}',
         prompt=agent.get('prompt', ''),
-        chunk_size=rag_config.get('chunk_size', 512),
-        chunk_overlap=rag_config.get('chunk_overlap', 50),
-        top_k=rag_config.get('similarity_top_k', 5),
-        temperature=rag_config.get('temperature', 0.1),
-        synthesis_mode=rag_config.get('synthesis_mode', 'compact'),
-        similarity_cutoff=rag_config.get('similarity_cutoff') if rag_config.get('sim_filter') else None,
-        rerank=rag_config.get('rerank', False),
-        rerank_top_n=rag_config.get('rerank_top_n', 3),
-        retrieval_mode=rag_config.get('retrieval_mode', 'naive'),
-        fusion_num_queries=rag_config.get('fusion_num_queries', 1),
-        long_reorder=rag_config.get('long_reorder', False),
+        chunk_size=rag_config.chunk_size,
+        chunk_overlap=rag_config.chunk_overlap,
+        top_k=rag_config.similarity_top_k,
+        temperature=rag_config.temperature,
+        synthesis_mode=rag_config.synthesis_mode,
+        similarity_cutoff=rag_config.effective_cutoff,
+        rerank=rag_config.rerank,
+        rerank_top_n=rag_config.rerank_top_n,
+        retrieval_mode=rag_config.retrieval_mode,
+        fusion_num_queries=rag_config.fusion_num_queries,
+        long_reorder=rag_config.long_reorder,
     )
 
 
@@ -265,7 +266,7 @@ def run_evaluation(run_id: str):
         nlp = _get_nlp(run['language'])
         query_engine, llm = _build_query_engine(run_id, agent, snapshot, file_paths)
 
-        retrieval_mode = snapshot.get('rag_config', {}).get('retrieval_mode', 'naive')
+        retrieval_mode = RagConfig.from_dict(snapshot.get('rag_config')).retrieval_mode
         lang = run.get('language', 'es')
         start_time = time.time()
         per_question = _execute_questions(run_id, query_engine, llm, run, nlp, retrieval_mode, lang)

@@ -6,6 +6,7 @@ from flask import Blueprint, request, jsonify
 
 from db import agents_col, config_snapshots_col, evaluation_runs_col
 from middleware.auth_middleware import token_required
+from services.rag_config import RagConfig
 from services.evaluation_service import parse_questions_csv, run_evaluation
 
 evaluations_bp = Blueprint('evaluations', __name__)
@@ -126,7 +127,8 @@ def create_evaluation(agent_id):
         return jsonify({'error': 'The CSV file has no questions'}), 400
 
     language = request.form.get('language', 'en').strip()
-    xai = bool(snapshot.get('rag_config', {}).get('xai', False))
+    rag_config = RagConfig.from_dict(snapshot.get('rag_config'))
+    xai = bool(rag_config.xai)
     try:
         n_exec = max(1, int(request.form.get('n_exec', 1)))
     except ValueError:
@@ -141,7 +143,7 @@ def create_evaluation(agent_id):
         'language': language,
         'xai': xai,
         'n_exec': n_exec,
-        'retrieval_mode': snapshot.get('rag_config', {}).get('retrieval_mode', 'naive'),
+        'retrieval_mode': rag_config.retrieval_mode,
         'rag_config': snapshot.get('rag_config', {}),
         'status': 'running',
         'results': None,
