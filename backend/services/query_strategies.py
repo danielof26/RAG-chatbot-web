@@ -68,7 +68,7 @@ class CRAGStrategy(QueryStrategy):
     def execute(self, query_engine, question: str, llm, synthesis_question: str = None) -> tuple:
         synthesis_question = synthesis_question or question
 
-        nodes = query_engine.retriever.retrieve(question)
+        nodes = query_engine.retrieve(QueryBundle(question))  # retriever + node_postprocessors
 
         relevant = [n for n in nodes if self._grade(n.text, question, llm) != 'IRRELEVANT']
         if not relevant:

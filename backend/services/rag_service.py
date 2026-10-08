@@ -427,7 +427,7 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict, chat_hi
         query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
                                              node_postprocessors=postprocessors, streaming=True)
     strategy = get_query_strategy(retrieval_mode)
-    if retrieval_mode in ('self_rag', 'router', 'fusion', 'raptor', 'sub_question', 'bm25'):
+    if retrieval_mode in ('crag', 'self_rag', 'router', 'fusion', 'raptor', 'sub_question', 'bm25'):
         answer, _ = strategy.execute(query_engine, effective_question, Settings.llm, synthesis_question=synthesis_question)
         for word in answer.split(' '):
             yield word + ' '
