@@ -44,6 +44,15 @@ class QueryStrategy(ABC):
         return answer, response
 
 
+class StrategyDecorator(QueryStrategy):
+    """Wraps another strategy and adds behaviour around its execute() (Decorator pattern)."""
+    def __init__(self, inner: QueryStrategy):
+        self.inner = inner
+
+    def build_query(self, question: str, llm) -> object:
+        return self.inner.build_query(question, llm)
+
+
 class NaiveStrategy(QueryStrategy):
     def build_query(self, question: str, llm) -> str:
         return question
@@ -93,15 +102,12 @@ class CRAGStrategy(QueryStrategy):
         return 'AMBIGUOUS'
 
 
-class SelfRAGStrategy(QueryStrategy):
-    def build_query(self, question: str, llm) -> str:
-        return question  # unused — execute() is fully overridden
+class SelfRAGDecorator(StrategyDecorator):
+    """After the inner strategy answers, the LLM critiques the answer against the retrieved chunks
+    and, if it is not supported, rewrites it once using only those chunks."""
 
     def execute(self, query_engine, question: str, llm, synthesis_question: str = None) -> tuple:
-        synthesis_question = synthesis_question or question
-
-        response = query_engine.query(synthesis_question)
-        answer = _to_text(response)
+        answer, response = self.inner.execute(query_engine, question, llm, synthesis_question=synthesis_question)
 
         if llm:
             evaluation = self._evaluate(question, response.source_nodes, answer, llm)
@@ -158,7 +164,7 @@ _STRATEGIES = {
     'hyde_answer':   HyDEAnswerStrategy,
     'hyde_combined': HyDECombinedStrategy,
     'crag':          CRAGStrategy,
-    'self_rag':      SelfRAGStrategy,
+    'self_rag':      lambda: SelfRAGDecorator(NaiveStrategy()),
 }
 # Modes not listed here (router, fusion, raptor, sub_question, bm25) don't transform the query text:
 # their behaviour lives in the engine builders of rag_service.py, so they fall back to NaiveStrategy.
