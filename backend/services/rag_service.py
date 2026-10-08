@@ -4,6 +4,7 @@ from llama_index.core.postprocessor import SimilarityPostprocessor
 from llama_index.core.postprocessor import SentenceTransformerRerank
 from llama_index.core.postprocessor import LongContextReorder
 from llama_index.llms.ollama import Ollama
+from dataclasses import dataclass, field
 import chromadb
 from llama_index.vector_stores.chroma import ChromaVectorStore
 import config
@@ -301,6 +302,83 @@ def _build_fusion_engine(index, chroma_collection, top_k: int, top_q: int, node_
     return RetrieverQueryEngine.from_args(fusion_retriever, node_postprocessors=node_postprocessors or [])
 
 
+@dataclass
+class EngineContext:
+    """Everything an engine builder may need; shared by the chat path and the evaluation path."""
+    index: object
+    chroma_collection: object
+    llm: object
+    collection_key: str          # "agent_{id}" in chat, "eval_{run_id}" in evaluation (names the RAPTOR tree)
+    top_k: int = 5
+    top_q: int = 1               # fusion_num_queries
+    synthesis_mode: str = 'compact'
+    postprocessors: list = field(default_factory=list)
+    streaming: bool = False
+
+
+def build_postprocessors(similarity_cutoff=None, rerank=False, rerank_top_n=3, long_reorder=False) -> list:
+    postprocessors = []
+    if similarity_cutoff:
+        postprocessors.append(SimilarityPostprocessor(similarity_cutoff=similarity_cutoff))
+    if rerank:
+        postprocessors.append(SentenceTransformerRerank(model='cross-encoder/ms-marco-MiniLM-L-6-v2', top_n=rerank_top_n))
+    if long_reorder:
+        postprocessors.append(LongContextReorder())
+    return postprocessors
+
+
+# retrieval_mode -> function(EngineContext) -> query engine. Modes not registered here
+# (naive, hyde_*, crag, self_rag) use the plain vector engine; they differ only in their QueryStrategy.
+_ENGINE_BUILDERS = {}
+
+
+def _register_engine(mode: str):
+    def decorator(builder):
+        _ENGINE_BUILDERS[mode] = builder
+        return builder
+    return decorator
+
+
+@_register_engine('router')
+def _router_engine(ctx):
+    return _build_router_engine(ctx.index, ctx.llm, ctx.top_k, node_postprocessors=ctx.postprocessors)
+
+
+@_register_engine('fusion')
+def _fusion_engine(ctx):
+    return _build_fusion_engine(ctx.index, ctx.chroma_collection, ctx.top_k, ctx.top_q, node_postprocessors=ctx.postprocessors)
+
+
+@_register_engine('raptor')
+def _raptor_engine(ctx):
+    return _build_raptor_engine(ctx.collection_key, ctx.chroma_collection, ctx.top_k, ctx.synthesis_mode,
+                                node_postprocessors=ctx.postprocessors)
+
+
+@_register_engine('sub_question')
+def _sub_question_engine(ctx):
+    return _build_sub_question_engine(ctx.index, ctx.top_k, node_postprocessors=ctx.postprocessors)
+
+
+@_register_engine('bm25')
+def _bm25_engine(ctx):
+    return _build_bm25_engine(ctx.chroma_collection, ctx.top_k, node_postprocessors=ctx.postprocessors)
+
+
+def _vector_engine(ctx):
+    return ctx.index.as_query_engine(similarity_top_k=ctx.top_k, response_mode=ctx.synthesis_mode,
+                                     node_postprocessors=ctx.postprocessors, streaming=ctx.streaming)
+
+
+def build_query_engine(retrieval_mode: str, ctx: EngineContext):
+    return _ENGINE_BUILDERS.get(retrieval_mode, _vector_engine)(ctx)
+
+
+# Modes whose answer is produced by strategy.execute() in one piece (custom engines, or strategies
+# that retrieve/critique on their own), so they cannot stream token by token.
+NON_STREAMING_MODES = frozenset({'crag', 'self_rag', 'router', 'fusion', 'raptor', 'sub_question', 'bm25'})
+
+
 def query_agent(agent_id: str, question: str, agent_config: dict, chat_history: list = None) -> str:
     """
     Hace una pregunta al RAG del agente y devuelve la respuesta.
@@ -314,13 +392,7 @@ def query_agent(agent_id: str, question: str, agent_config: dict, chat_history: 
         return "This agent has no knowledge documents yet. Upload a document first."
 
     rag_config = RagConfig.from_dict(agent_config.get('rag_config'))
-    top_k              = rag_config.similarity_top_k
-    top_q              = rag_config.fusion_num_queries
-    retrieval_mode     = rag_config.retrieval_mode
-    synthesis_mode     = rag_config.synthesis_mode
-    similarity_cutoff  = rag_config.effective_cutoff
-    rerank             = rag_config.rerank
-    long_reorder       = rag_config.long_reorder
+    retrieval_mode = rag_config.retrieval_mode
 
     # Conversational memory: reformulate question or build synthesis context
     effective_question = question
@@ -340,26 +412,16 @@ def query_agent(agent_id: str, question: str, agent_config: dict, chat_history: 
             )
 
     index = VectorStoreIndex.from_vector_store(vector_store, storage_context=storage_context)
-    postprocessors = []
-    if similarity_cutoff:
-        postprocessors.append(SimilarityPostprocessor(similarity_cutoff=similarity_cutoff))
-    if rerank:
-        postprocessors.append(SentenceTransformerRerank(model='cross-encoder/ms-marco-MiniLM-L-6-v2', top_n=rag_config.rerank_top_n))
-    if long_reorder:
-        postprocessors.append(LongContextReorder())
-    if retrieval_mode == 'router':
-        query_engine = _build_router_engine(index, Settings.llm, top_k, node_postprocessors=postprocessors)
-    elif retrieval_mode == 'fusion':
-        query_engine = _build_fusion_engine(index, chroma_collection, top_k, top_q, node_postprocessors=postprocessors)
-    elif retrieval_mode == 'raptor':
-        query_engine = _build_raptor_engine(f"agent_{agent_id}", chroma_collection, top_k, synthesis_mode, node_postprocessors=postprocessors)
-    elif retrieval_mode == 'sub_question':
-        query_engine = _build_sub_question_engine(index, top_k, node_postprocessors=postprocessors)
-    elif retrieval_mode == 'bm25':
-        query_engine = _build_bm25_engine(chroma_collection, top_k, node_postprocessors=postprocessors)
-    else:
-        query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
-                                             node_postprocessors=postprocessors)
+    ctx = EngineContext(
+        index=index, chroma_collection=chroma_collection, llm=Settings.llm,
+        collection_key=f"agent_{agent_id}",
+        top_k=rag_config.similarity_top_k, top_q=rag_config.fusion_num_queries,
+        synthesis_mode=rag_config.synthesis_mode,
+        postprocessors=build_postprocessors(rag_config.effective_cutoff, rag_config.rerank,
+                                            rag_config.rerank_top_n, rag_config.long_reorder),
+        streaming=False,
+    )
+    query_engine = build_query_engine(retrieval_mode, ctx)
     strategy = get_query_strategy(retrieval_mode)
     answer, _ = strategy.execute(query_engine, effective_question, Settings.llm, synthesis_question=synthesis_question)
     if not answer or not answer.strip():
@@ -381,13 +443,7 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict, chat_hi
         return
 
     rag_config = RagConfig.from_dict(agent_config.get('rag_config'))
-    top_k              = rag_config.similarity_top_k
-    top_q              = rag_config.fusion_num_queries
-    retrieval_mode     = rag_config.retrieval_mode
-    synthesis_mode     = rag_config.synthesis_mode
-    similarity_cutoff  = rag_config.effective_cutoff
-    rerank             = rag_config.rerank
-    long_reorder       = rag_config.long_reorder
+    retrieval_mode = rag_config.retrieval_mode
 
     # Conversational memory
     effective_question = question
@@ -407,28 +463,18 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict, chat_hi
             )
 
     index = VectorStoreIndex.from_vector_store(vector_store, storage_context=storage_context)
-    postprocessors = []
-    if similarity_cutoff:
-        postprocessors.append(SimilarityPostprocessor(similarity_cutoff=similarity_cutoff))
-    if rerank:
-        postprocessors.append(SentenceTransformerRerank(model='cross-encoder/ms-marco-MiniLM-L-6-v2', top_n=rag_config.rerank_top_n))
-    if long_reorder:
-        postprocessors.append(LongContextReorder())
-    if retrieval_mode == 'router':
-        query_engine = _build_router_engine(index, Settings.llm, top_k, node_postprocessors=postprocessors)
-    elif retrieval_mode == 'fusion':
-        query_engine = _build_fusion_engine(index, chroma_collection, top_k, top_q, node_postprocessors=postprocessors)
-    elif retrieval_mode == 'raptor':
-        query_engine = _build_raptor_engine(f"agent_{agent_id}", chroma_collection, top_k, synthesis_mode, node_postprocessors=postprocessors)
-    elif retrieval_mode == 'sub_question':
-        query_engine = _build_sub_question_engine(index, top_k, node_postprocessors=postprocessors)
-    elif retrieval_mode == 'bm25':
-        query_engine = _build_bm25_engine(chroma_collection, top_k, node_postprocessors=postprocessors)
-    else:
-        query_engine = index.as_query_engine(similarity_top_k=top_k, response_mode=synthesis_mode,
-                                             node_postprocessors=postprocessors, streaming=True)
+    ctx = EngineContext(
+        index=index, chroma_collection=chroma_collection, llm=Settings.llm,
+        collection_key=f"agent_{agent_id}",
+        top_k=rag_config.similarity_top_k, top_q=rag_config.fusion_num_queries,
+        synthesis_mode=rag_config.synthesis_mode,
+        postprocessors=build_postprocessors(rag_config.effective_cutoff, rag_config.rerank,
+                                            rag_config.rerank_top_n, rag_config.long_reorder),
+        streaming=True,
+    )
+    query_engine = build_query_engine(retrieval_mode, ctx)
     strategy = get_query_strategy(retrieval_mode)
-    if retrieval_mode in ('crag', 'self_rag', 'router', 'fusion', 'raptor', 'sub_question', 'bm25'):
+    if retrieval_mode in NON_STREAMING_MODES:
         answer, _ = strategy.execute(query_engine, effective_question, Settings.llm, synthesis_question=synthesis_question)
         for word in answer.split(' '):
             yield word + ' '

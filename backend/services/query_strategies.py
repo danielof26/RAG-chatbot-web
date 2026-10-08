@@ -159,12 +159,9 @@ _STRATEGIES = {
     'hyde_combined': HyDECombinedStrategy,
     'crag':          CRAGStrategy,
     'self_rag':      SelfRAGStrategy,
-    'router':        NaiveStrategy,
-    'fusion':        NaiveStrategy,
-    'raptor':        NaiveStrategy,
-    'sub_question':  NaiveStrategy,
-    'bm25':          NaiveStrategy,
 }
+# Modes not listed here (router, fusion, raptor, sub_question, bm25) don't transform the query text:
+# their behaviour lives in the engine builders of rag_service.py, so they fall back to NaiveStrategy.
 
 
 def get_query_strategy(mode: str) -> QueryStrategy:
