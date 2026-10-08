@@ -3,6 +3,7 @@ from bson import ObjectId
 from datetime import datetime, timezone
 from db import llm_servers_col
 from middleware.auth_middleware import token_required
+from request_utils import json_object, public_error_message, str_field
 from serializers import serialize_doc
 from services.llm_providers import get_provider, PROVIDERS
 from services.secrets_box import decrypt, encrypt, mask
@@ -30,12 +31,12 @@ def get_llm_servers():
 @llm_servers_bp.route('/api/llm-servers', methods=['POST'])
 @token_required
 def create_llm_server():
-    data = request.get_json()
+    data = json_object()
     if not data:
         return jsonify({'error': 'JSON body required'}), 400
 
-    name = data.get('name', '').strip()
-    server_type = data.get('type', '').strip()
+    name = str_field(data, 'name')
+    server_type = str_field(data, 'type')
 
     if not name:
         return jsonify({'error': 'Name is required'}), 400
@@ -52,7 +53,7 @@ def create_llm_server():
     }
 
     for field in provider_cls.REQUIRED_FIELDS:
-        value = data.get(field, '').strip()
+        value = str_field(data, field)
         if not value:
             return jsonify({'error': f'{field} is required for {server_type}'}), 400
         server[field] = value
@@ -103,4 +104,4 @@ def get_server_models(server_id):
         models = provider.get_models()
         return jsonify({'models': models}), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': public_error_message(e)}), 500

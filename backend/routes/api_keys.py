@@ -5,6 +5,7 @@ import secrets
 from db import api_keys_col
 from middleware.agent_middleware import INVALID_ID, with_agent
 from middleware.auth_middleware import token_required
+from request_utils import json_object, str_field
 from serializers import serialize_doc
 from services.secrets_box import hash_api_key, mask
 
@@ -33,8 +34,8 @@ def list_keys(agent_id, agent):
 @token_required
 @with_agent
 def create_key(agent_id, agent):
-    data = request.get_json() or {}
-    name = data.get('name', '').strip() or f"Key {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
+    data = json_object() or {}
+    name = str_field(data, 'name') or f"Key {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
     raw_key = 'ak-' + secrets.token_urlsafe(32)
 
     doc = {

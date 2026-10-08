@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from db import config_snapshots_col
 from middleware.agent_middleware import INVALID_ID, with_agent
 from middleware.auth_middleware import token_required
+from request_utils import json_object, str_field
 from serializers import serialize_doc
 
 config_snapshots_bp = Blueprint('config_snapshots', __name__)
@@ -29,8 +30,8 @@ def list_snapshots(agent_id, agent):
 @token_required
 @with_agent
 def create_snapshot(agent_id, agent):
-    data = request.get_json() or {}
-    name = data.get('name', '').strip() or f"Config {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
+    data = json_object() or {}
+    name = str_field(data, 'name') or f"Config {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
 
     doc = {
         'agent_id': agent_id,

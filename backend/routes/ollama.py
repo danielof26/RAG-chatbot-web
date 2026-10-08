@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import json
 from middleware.auth_middleware import api_key_error
 from repositories.agent_repository import AgentRepository
+from request_utils import str_field
 from services.rag_service import query_agent, stream_query_agent
 
 ollama_bp = Blueprint('ollama', __name__)
@@ -52,10 +53,11 @@ def generate(agent_id):
         return error
 
     data = request.get_json(force=True, silent=True)
+    data = data if isinstance(data, dict) else None
     if not data:
         return jsonify({'error': 'JSON body required'}), 400
 
-    prompt = data.get('prompt', '').strip()
+    prompt = str_field(data, 'prompt')
     if not prompt:
         return jsonify({'error': 'prompt is required'}), 400
 
@@ -117,16 +119,18 @@ def chat(agent_id):
         return error
 
     data = request.get_json(force=True, silent=True)
+    data = data if isinstance(data, dict) else None
     if not data:
         return jsonify({'error': 'JSON body required'}), 400
 
-    messages = data.get('messages', [])
-    if not messages:
+    messages = data.get('messages')
+    if not isinstance(messages, list) or not messages:
         return jsonify({'error': 'messages is required'}), 400
 
     # Coge el último mensaje del usuario como pregunta
     question = next(
-        (m['content'] for m in reversed(messages) if m.get('role') == 'user'),
+        (m['content'] for m in reversed(messages)
+         if isinstance(m, dict) and m.get('role') == 'user' and isinstance(m.get('content'), str) and m['content'].strip()),
         None
     )
     if not question:

@@ -5,18 +5,19 @@ import bcrypt
 import jwt
 import config
 from db import users_col as users
+from request_utils import json_object, str_field
 
 auth_bp = Blueprint('auth', __name__)
 
 
 @auth_bp.route('/api/register', methods=['POST'])
 def register():
-    data = request.get_json()
+    data = json_object()
     if not data:
         return jsonify({'error': 'Body JSON required'}), 400
 
-    email = data.get('email', '').lower().strip()
-    password = data.get('password', '')
+    email = str_field(data, 'email').lower()
+    password = data.get('password') if isinstance(data.get('password'), str) else ''
 
     if not email or not password:
         return jsonify({'error': 'Email and password required'}), 400
@@ -40,12 +41,12 @@ def register():
 
 @auth_bp.route('/api/login', methods=['POST'])
 def login():
-    data = request.get_json()
+    data = json_object()
     if not data:
         return jsonify({'error': 'Body JSON required'}), 400
 
-    email = data.get('email', '').lower().strip()
-    password = data.get('password', '')
+    email = str_field(data, 'email').lower()
+    password = data.get('password') if isinstance(data.get('password'), str) else ''
 
     user = users.find_one({'email': email})
 
