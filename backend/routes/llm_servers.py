@@ -5,6 +5,7 @@ from db import llm_servers_col
 from middleware.auth_middleware import token_required
 from serializers import serialize_doc
 from services.llm_providers import get_provider, PROVIDERS
+from services.secrets_box import decrypt, encrypt, mask
 
 llm_servers_bp = Blueprint('llm_servers', __name__)
 
@@ -15,8 +16,7 @@ INVALID_ID = 'Invalid server ID'
 def _serialize(server):
     serialize_doc(server)
     if 'api_key' in server:
-        key = server['api_key']
-        server['api_key'] = key[:8] + '...' if len(key) > 8 else '...'
+        server['api_key'] = mask(decrypt(server['api_key']))
     return server
 
 
@@ -60,6 +60,8 @@ def create_llm_server():
     if not get_provider(server).validate():
         return jsonify({'error': f'Could not connect to the {server_type} server. Check the URL and credentials.'}), 400
 
+    if 'api_key' in server:
+        server['api_key'] = encrypt(server['api_key'])
     result = llm_servers_col.insert_one(server)
     server['_id'] = str(result.inserted_id)
     return jsonify(_serialize(server)), 201

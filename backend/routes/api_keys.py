@@ -6,17 +6,18 @@ from db import api_keys_col
 from middleware.agent_middleware import INVALID_ID, with_agent
 from middleware.auth_middleware import token_required
 from serializers import serialize_doc
+from services.secrets_box import hash_api_key, mask
 
 api_keys_bp = Blueprint('api_keys', __name__)
 
 KEY_NOT_FOUND   = 'API key not found'
 
 
-def _serialize_key(key, reveal=False):
+def _serialize_key(key, raw_key=None):
+    """`key` is what the UI shows: the full key right after creation, the stored prefix afterwards."""
     serialize_doc(key)
-    if not reveal:
-        raw = key.get('key', '')
-        key['key'] = raw[:8] + '...' if len(raw) > 8 else raw
+    key['key'] = raw_key or key.get('key_prefix', '')
+    key.pop('key_hash', None)
     return key
 
 
@@ -40,13 +41,14 @@ def create_key(agent_id, agent):
         'agent_id': agent_id,
         'user_id': request.user_id,
         'name': name,
-        'key': raw_key,
+        'key_hash': hash_api_key(raw_key),
+        'key_prefix': mask(raw_key),
         'created_at': datetime.now(timezone.utc)
     }
     result = api_keys_col.insert_one(doc)
     doc['_id'] = str(result.inserted_id)
 
-    return jsonify(_serialize_key(doc, reveal=True)), 201
+    return jsonify(_serialize_key(doc, raw_key=raw_key)), 201
 
 
 @api_keys_bp.route('/api/agents/<agent_id>/api-keys/<key_id>', methods=['DELETE'])

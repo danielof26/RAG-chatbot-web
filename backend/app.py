@@ -13,10 +13,12 @@ from routes.config_snapshots import config_snapshots_bp
 from routes.evaluations import evaluations_bp
 from routes.rag_catalog import rag_catalog_bp
 from services.job_state import recover_interrupted_jobs
+from services.secret_migration import migrate_plaintext_secrets
 
 FRONTEND_DIST = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'dist')
 
-app = Flask(__name__, static_folder=FRONTEND_DIST, static_url_path='')
+# static_folder=None: the built-in static route would shadow serve_react and 404 on reloads of SPA routes
+app = Flask(__name__, static_folder=None)
 CORS(app)
 
 app.register_blueprint(auth_bp)
@@ -36,6 +38,13 @@ try:
         print(f'[startup] Marked interrupted jobs as error: {recovered}')
 except Exception as e:
     print(f'[startup] Could not recover interrupted jobs: {e}')
+
+try:
+    migrated = migrate_plaintext_secrets()
+    if any(migrated.values()):
+        print(f'[startup] Protected plaintext secrets: {migrated}')
+except Exception as e:
+    print(f'[startup] Could not migrate plaintext secrets: {e}')
 
 
 @app.route('/', defaults={'path': ''}, methods=['GET'])

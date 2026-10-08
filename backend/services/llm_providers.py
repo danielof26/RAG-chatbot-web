@@ -6,6 +6,8 @@ from llama_index.core.bridge.pydantic import PrivateAttr
 from llama_index.core.embeddings import BaseEmbedding
 from llama_index.llms.ollama import Ollama
 
+from services.secrets_box import decrypt
+
 CONTEXT_WINDOW = 8000  # tokens, for the Ollama and OpenAI-like LLMs
 
 
@@ -186,4 +188,7 @@ def get_provider(server_config: dict) -> LLMProvider:
     cls = PROVIDERS.get(provider_type)
     if not cls:
         raise ValueError(f'Unknown provider type: {provider_type}')
-    return cls(**server_config)
+    config = dict(server_config)
+    if 'api_key' in config:
+        config['api_key'] = decrypt(config['api_key'])
+    return cls(**config)

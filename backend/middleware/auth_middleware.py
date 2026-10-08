@@ -2,6 +2,7 @@ from flask import request, jsonify
 from functools import wraps
 import jwt
 import config
+from services.secrets_box import hash_api_key
 
 def token_required(f):
     @wraps(f)
@@ -33,6 +34,6 @@ def api_key_error(agent):
         return None
     from db import api_keys_col
     provided = request.headers.get('X-API-Key', '')
-    if api_keys_col.find_one({'agent_id': str(agent['_id']), 'key': provided}):
+    if api_keys_col.find_one({'agent_id': str(agent['_id']), 'key_hash': hash_api_key(provided)}):
         return None
     return jsonify({'error': 'Invalid or missing API key'}), 401
