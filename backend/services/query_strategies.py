@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 
 from llama_index.core import QueryBundle
+from llama_index.core.query_engine import RetrieverQueryEngine
 
 _SELF_RAG_DEBUG = True  # set to False to disable Self-RAG evaluation logging
 
@@ -32,16 +33,25 @@ class QueryStrategy(ABC):
     def build_query(self, question: str, llm) -> object:
         """Returns a str (naive) or QueryBundle (HyDE) for the retriever."""
 
-    def execute(self, query_engine, question: str, llm, synthesis_question: str = None) -> tuple:
+    def execute(self, query_engine, question: str, llm, synthesis_question: str = None,
+                answer_instruction: str = '') -> tuple:
+        """`answer_instruction` is text that only the model writing the answer should see (e.g. XAI's request to
+        cite sources). It is kept out of the retrieval query whenever the engine allows retrieving and
+        synthesizing separately; otherwise (router, sub-question) the engine receives a single string."""
         synthesis_question = synthesis_question or question
         query = self.build_query(question, llm)
         if isinstance(query, QueryBundle):
-            query = QueryBundle(query_str=synthesis_question, custom_embedding_strs=query.custom_embedding_strs)
+            retrieval = QueryBundle(query_str=synthesis_question, custom_embedding_strs=query.custom_embedding_strs)
         else:
-            query = synthesis_question
-        response = query_engine.query(query)
-        answer = _to_text(response)
-        return answer, response
+            retrieval = QueryBundle(synthesis_question)
+
+        if answer_instruction and isinstance(query_engine, RetrieverQueryEngine):
+            nodes = query_engine.retrieve(retrieval)
+            response = query_engine.synthesize(QueryBundle(synthesis_question + answer_instruction), nodes)
+        else:
+            retrieval.query_str += answer_instruction
+            response = query_engine.query(retrieval if isinstance(query, QueryBundle) else retrieval.query_str)
+        return _to_text(response), response
 
 
 class StrategyDecorator(QueryStrategy):
@@ -74,8 +84,9 @@ class CRAGStrategy(QueryStrategy):
     def build_query(self, question: str, llm) -> str:
         return question  # unused — execute() is fully overridden
 
-    def execute(self, query_engine, question: str, llm, synthesis_question: str = None) -> tuple:
-        synthesis_question = synthesis_question or question
+    def execute(self, query_engine, question: str, llm, synthesis_question: str = None,
+                answer_instruction: str = '') -> tuple:
+        synthesis_question = (synthesis_question or question) + answer_instruction
 
         nodes = query_engine.retrieve(QueryBundle(question))  # retriever + node_postprocessors
 
@@ -106,8 +117,10 @@ class SelfRAGDecorator(StrategyDecorator):
     """After the inner strategy answers, the LLM critiques the answer against the retrieved chunks
     and, if it is not supported, rewrites it once using only those chunks."""
 
-    def execute(self, query_engine, question: str, llm, synthesis_question: str = None) -> tuple:
-        answer, response = self.inner.execute(query_engine, question, llm, synthesis_question=synthesis_question)
+    def execute(self, query_engine, question: str, llm, synthesis_question: str = None,
+                answer_instruction: str = '') -> tuple:
+        answer, response = self.inner.execute(query_engine, question, llm, synthesis_question=synthesis_question,
+                                              answer_instruction=answer_instruction)
 
         if llm:
             evaluation = self._evaluate(question, response.source_nodes, answer, llm)

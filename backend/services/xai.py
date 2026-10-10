@@ -199,9 +199,11 @@ class XAIDecorator(StrategyDecorator):
         super().__init__(inner)
         self.max_refine = max_refine
 
-    def execute(self, query_engine, question: str, llm, synthesis_question: str = None) -> tuple:
-        synthesis_question = (synthesis_question or question) + CITATION_INSTRUCTION
-        answer, response = self.inner.execute(query_engine, question, llm, synthesis_question=synthesis_question)
+    def execute(self, query_engine, question: str, llm, synthesis_question: str = None,
+                answer_instruction: str = '') -> tuple:
+        # The citation request goes to the model that writes the answer, never into the retrieval query
+        answer, response = self.inner.execute(query_engine, question, llm, synthesis_question=synthesis_question,
+                                              answer_instruction=answer_instruction + CITATION_INSTRUCTION)
         source_texts = [node.text for node in response.source_nodes]
         answer, citations, hallucinations, process_log = _xai_feedback_loop(
             _clean_answer(answer), source_texts, llm, question, self.max_refine
