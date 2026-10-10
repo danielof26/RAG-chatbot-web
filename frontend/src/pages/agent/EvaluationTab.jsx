@@ -285,18 +285,6 @@ export default function EvaluationTab({ id, api, active }) {
                   <div className="flex items-center gap-3">
                     {r.status === 'running' && <span className="text-xs text-orange-500 bg-orange-50 px-2 py-1 rounded-full animate-pulse">Running...</span>}
                     {r.status === 'error' && <span className="text-xs text-red-400 bg-red-50 px-2 py-1 rounded-full">Error</span>}
-                    {r.status === 'done' && r.global_results && (() => {
-                      const rouge1 = r.global_results.avg_rouge1
-                      const colorClass = rouge1 != null
-                        ? rouge1 >= 0.6 ? 'text-green-600 bg-green-50'
-                          : rouge1 >= 0.4 ? 'text-orange-500 bg-orange-50'
-                          : 'text-red-500 bg-red-50'
-                        : 'text-green-600 bg-green-50'
-                      const label = rouge1 != null
-                        ? `Quality ${Math.round(rouge1 * 100)}%`
-                        : `Score ${r.global_results.score.mean}`
-                      return <span className={`text-xs px-2 py-1 rounded-full ${colorClass}`}>{label}</span>
-                    })()}
                     <button
                       onClick={() => handleDeleteRun(r._id)}
                       className="text-xs text-red-400 hover:text-red-500 transition"
