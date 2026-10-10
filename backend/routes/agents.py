@@ -14,7 +14,7 @@ from middleware.auth_middleware import token_required, api_key_error
 from serializers import isoformat_fields, serialize_doc
 from services.job_state import claim_document_for_indexing, set_document_status
 from states import DocumentStatus
-from services.rag_service import index_document, query_agent, delete_document_vectors
+from services.rag_service import delete_agent_collection, delete_document_vectors, index_document, query_agent
 import config
 
 agents_bp = Blueprint('agents', __name__)
