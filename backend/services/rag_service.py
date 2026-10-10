@@ -6,6 +6,7 @@ from llama_index.core.postprocessor import SentenceTransformerRerank
 from llama_index.core.postprocessor import LongContextReorder
 from llama_index.llms.ollama import Ollama
 import copy
+import json
 from pathlib import Path
 import threading
 from dataclasses import dataclass, field
@@ -251,6 +252,23 @@ def _clean_chroma_metadata(meta: dict) -> dict:
     return {k: v for k, v in (meta or {}).items() if k not in _CHROMA_INTERNAL_METADATA_KEYS}
 
 
+def _rebuilt_node_fields(meta: dict) -> dict:
+    """Keyword arguments to rebuild a Document/TextNode from a chunk stored in ChromaDB: its clean metadata plus
+    the lists of metadata keys hidden from the LLM and from the embedding. SimpleDirectoryReader hides file_name,
+    file_size, dates... on the original node and ChromaDB keeps those lists inside `_node_content`; without them
+    the rebuilt nodes would show everything to the LLM and the BM25/RAPTOR/Fusion prompts would differ from the
+    vector retriever's for reasons unrelated to the technique."""
+    try:
+        original = json.loads((meta or {}).get('_node_content') or '{}')
+    except ValueError:
+        original = {}
+    return {
+        'metadata': _clean_chroma_metadata(meta),
+        'excluded_llm_metadata_keys': original.get('excluded_llm_metadata_keys', []),
+        'excluded_embed_metadata_keys': original.get('excluded_embed_metadata_keys', []),
+    }
+
+
 def _build_raptor_engine(collection_key: str, chroma_collection, llm, embed_model, top_k: int, synthesis_mode: str, node_postprocessors=None):
     """
     collection_key identifies the RAPTOR tree's own ChromaDB collection (separate from the
@@ -269,7 +287,7 @@ def _build_raptor_engine(collection_key: str, chroma_collection, llm, embed_mode
         print(f"[RAPTOR] Building tree for {collection_key}...")
         raw = chroma_collection.get(include=['documents', 'metadatas'])
         documents = [
-            Document(text=text, metadata=_clean_chroma_metadata(meta))
+            Document(text=text, **_rebuilt_node_fields(meta))
             for text, meta in zip(raw['documents'], raw['metadatas'])
         ]
     else:
@@ -306,7 +324,7 @@ def _build_bm25_base(chroma_collection):
 
     raw = chroma_collection.get(include=['documents', 'metadatas'])
     nodes = [
-        TextNode(text=doc, metadata=_clean_chroma_metadata(meta))
+        TextNode(text=doc, **_rebuilt_node_fields(meta))
         for doc, meta in zip(raw['documents'], raw['metadatas'])
     ]
     return BM25Retriever.from_defaults(nodes=nodes, similarity_top_k=max(len(nodes), 1))
