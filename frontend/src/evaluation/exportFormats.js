@@ -1,26 +1,17 @@
 // Builds the downloadable files of an evaluation run. Each format turns the same
 // payload ({ config, global, perQuestion }) into text; adding a format = adding one entry.
 
+import { configEntries } from './configSummary'
+
 const csvCell = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`
 
-// Same summary as the tags shown for a saved configuration: optional settings only appear when active.
-const summarizeConfig = (run) => {
-  const cfg = run.rag_config ?? {}
-  return Object.fromEntries([
-    ['configuration', run.snapshot_name],
-    ['retrieval', cfg.retrieval_mode],
-    ['synthesis', cfg.synthesis_mode],
-    ['top_k', cfg.similarity_top_k],
-    cfg.chunk_size != null && ['chunk', `${cfg.chunk_size}/${cfg.chunk_overlap ?? 0}`],
-    ['temp', cfg.temperature],
-    cfg.rerank && ['rerank', true],
-    cfg.sim_filter && ['sim_filter', cfg.similarity_cutoff],
-    ['model', run.llm_model],
-    ['embed_model', run.embed_model],
-    ['language', run.language],
-    ['repetitions', run.n_exec],
-  ].filter(entry => entry && entry[1] != null))
-}
+// Same summary as the tags shown for a saved configuration, plus what only the run knows.
+const summarizeConfig = (run) => Object.fromEntries([
+  ['configuration', run.snapshot_name],
+  ...configEntries(run.rag_config ?? {}, { llmModel: run.llm_model, embedModel: run.embed_model }),
+  ['language', run.language],
+  ['repetitions', run.n_exec],
+].filter(entry => entry[1] != null))
 
 export const buildExportPayload = (run, detail) => ({
   config: summarizeConfig(detail),

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { configTags } from '../../evaluation/configSummary'
 import DownloadDialog from '../../components/DownloadDialog'
 import { downloadRun } from '../../evaluation/exportFormats'
 
@@ -133,26 +134,13 @@ export default function EvaluationTab({ id, api, active }) {
               <div key={s._id} className="flex items-center justify-between border border-gray-100 rounded-lg px-4 py-3">
                 <div>
                   <p className="text-sm text-gray-700">{s.name}</p>
-                  {s.rag_config && (() => {
-                    const cfg = s.rag_config
-                    const tags = [
-                      cfg.retrieval_mode && `retrieval: ${cfg.retrieval_mode}`,
-                      cfg.synthesis_mode && `synthesis: ${cfg.synthesis_mode}`,
-                      cfg.similarity_top_k != null && `top_k: ${cfg.similarity_top_k}`,
-                      cfg.chunk_size != null && `chunk: ${cfg.chunk_size}/${cfg.chunk_overlap ?? 0}`,
-                      cfg.temperature != null && `temp: ${cfg.temperature}`,
-                      cfg.rerank && `rerank`,
-                      cfg.sim_filter && `sim_filter: ${cfg.similarity_cutoff ?? ''}`,
-                      s.llm_model && `model: ${s.llm_model}`,
-                    ].filter(Boolean)
-                    return (
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {tags.map(t => (
-                          <span key={t} className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">{t}</span>
-                        ))}
-                      </div>
-                    )
-                  })()}
+                  {s.rag_config && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {configTags(s.rag_config, { llmModel: s.llm_model, embedModel: s.embed_model }).map(t => (
+                        <span key={t} className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">{t}</span>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <button
                   onClick={() => handleDeleteSnapshot(s._id)}
@@ -298,25 +286,13 @@ export default function EvaluationTab({ id, api, active }) {
                     {r.status === 'error' && (
                       <p className="text-sm text-red-500">{expandedRunDetail.error}</p>
                     )}
-                    {r.rag_config && Object.keys(r.rag_config).length > 0 && (() => {
-                      const cfg = r.rag_config
-                      const tags = [
-                        cfg.retrieval_mode && `retrieval: ${cfg.retrieval_mode}`,
-                        cfg.synthesis_mode && `synthesis: ${cfg.synthesis_mode}`,
-                        cfg.similarity_top_k != null && `top_k: ${cfg.similarity_top_k}`,
-                        cfg.chunk_size != null && `chunk: ${cfg.chunk_size}/${cfg.chunk_overlap ?? 0}`,
-                        cfg.temperature != null && `temp: ${cfg.temperature}`,
-                        cfg.rerank && `rerank`,
-                        cfg.sim_filter && `sim_filter: ${cfg.similarity_cutoff ?? ''}`,
-                      ].filter(Boolean)
-                      return (
-                        <div className="flex flex-wrap gap-1">
-                          {tags.map(t => (
-                            <span key={t} className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">{t}</span>
-                          ))}
-                        </div>
-                      )
-                    })()}
+                    {expandedRunDetail.rag_config && Object.keys(expandedRunDetail.rag_config).length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {configTags(expandedRunDetail.rag_config, { llmModel: expandedRunDetail.llm_model, embedModel: expandedRunDetail.embed_model }).map(t => (
+                          <span key={t} className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">{t}</span>
+                        ))}
+                      </div>
+                    )}
                     {r.status === 'done' && expandedRunDetail.results && (
                       <>
                         <div className="text-xs text-gray-600 grid grid-cols-2 gap-2">
