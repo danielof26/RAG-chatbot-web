@@ -9,7 +9,7 @@ from middleware.agent_middleware import INVALID_ID, with_agent
 from middleware.auth_middleware import token_required
 from services.rag_config import RagConfig
 from states import RunStatus
-from services.evaluation_service import SUPPORTED_LANGUAGES, parse_questions_csv, run_evaluation
+from services.evaluation_service import SUPPORTED_LANGUAGES, parse_questions_csv, run_evaluation, xlsx_to_csv_bytes
 from upload_policy import MAX_DATASET_BYTES, MAX_EVALUATION_EXECUTIONS
 
 evaluations_bp = Blueprint('evaluations', __name__)
@@ -126,9 +126,13 @@ def create_evaluation(agent_id, agent):
         return jsonify({'error': 'No dataset file has been uploaded'}), 400
 
     try:
-        dataset = parse_questions_csv(request.files['file'].read(MAX_DATASET_BYTES + 1))
+        uploaded = request.files['file']
+        content = uploaded.read(MAX_DATASET_BYTES + 1)
+        if (uploaded.filename or '').lower().endswith('.xlsx'):
+            content = xlsx_to_csv_bytes(content)
+        dataset = parse_questions_csv(content)
     except ValueError as e:
-        return jsonify({'error': f'Could not parse the CSV file: {e}'}), 400
+        return jsonify({'error': f'Could not parse the dataset file: {e}'}), 400
 
     if not dataset:
         return jsonify({'error': 'The CSV file has no questions'}), 400

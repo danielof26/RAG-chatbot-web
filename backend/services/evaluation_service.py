@@ -4,6 +4,7 @@ import statistics
 import threading
 import time
 
+import openpyxl
 import spacy
 from bson import ObjectId
 from nltk.stem import SnowballStemmer
@@ -87,12 +88,34 @@ def compute_bertscore(generated: str, reference: str, lang: str = 'es') -> float
         return None
 
 
+def xlsx_to_csv_bytes(file_bytes: bytes) -> bytes:
+    """Converts the first sheet of an uploaded .xlsx into the same ';' CSV that parse_questions_csv expects."""
+    if len(file_bytes) > MAX_DATASET_BYTES:
+        raise ValueError(f'the file is larger than {MAX_DATASET_BYTES // 1024} KB')
+    try:
+        workbook = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+    except Exception as e:
+        raise ValueError('the file is not a valid .xlsx workbook') from e
+    try:
+        out = io.StringIO()
+        writer = csv.writer(out, delimiter=';')
+        for row in workbook.worksheets[0].iter_rows(values_only=True):
+            if any(cell is not None for cell in row):
+                writer.writerow(['' if cell is None else cell for cell in row])
+    finally:
+        workbook.close()
+    return out.getvalue().encode('utf-8')
+
+
 def parse_questions_csv(file_bytes: bytes) -> list:
-    """Parses an uploaded CSV (Question;Keywords;Answer) into a list of question dicts."""
+    """Parses an uploaded CSV (Question;Keywords;Answer) into a list of question dicts. Columns are matched by
+    name (any order, extra ones ignored) and the separator, ; or ,, is detected from the header line."""
     if len(file_bytes) > MAX_DATASET_BYTES:
         raise ValueError(f'the file is larger than {MAX_DATASET_BYTES // 1024} KB')
     text = file_bytes.decode('utf-8-sig')
-    reader = csv.DictReader(io.StringIO(text), delimiter=';')
+    header = text.split('\n', 1)[0]
+    delimiter = ';' if header.count(';') >= header.count(',') else ','
+    reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
     missing = {'Question', 'Keywords'} - set(reader.fieldnames or [])
     if missing:
         raise ValueError(f'missing column(s): {", ".join(sorted(missing))}. Expected: Question;Keywords;Answer')

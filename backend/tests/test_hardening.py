@@ -183,6 +183,8 @@ def test_other_endpoints_survive_wrong_types(client, auth, agent):
 def test_dataset_csv_limits_and_clear_errors():
     from services.evaluation_service import parse_questions_csv
     assert parse_questions_csv(b'Question;Keywords;Answer\nq;k;a\n')[0]['question'] == 'q'
+    comma = parse_questions_csv('Question,Answer,Keywords,Category\n"q, 1","a","k1,k2",x\n'.encode())
+    assert comma == [{'question': 'q, 1', 'keywords': 'k1,k2', 'reference_answer': 'a'}]
     with pytest.raises(ValueError, match='missing column'):
         parse_questions_csv(b'Pregunta;Palabras\nq;k\n')
     with pytest.raises(ValueError, match='larger'):
@@ -193,9 +195,37 @@ def test_dataset_csv_limits_and_clear_errors():
         parse_questions_csv(b'\xff\xfe\x00')
 
 
+def _xlsx_bytes(rows):
+    import openpyxl
+    wb = openpyxl.Workbook()
+    for row in rows:
+        wb.active.append(row)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_xlsx_dataset_is_converted_to_the_csv_format():
+    from services.evaluation_service import parse_questions_csv, xlsx_to_csv_bytes
+    data = _xlsx_bytes([['Question', 'Keywords', 'Answer'], ['¿Cuántos días?', 'días', None], [None, None, None], ['q2', 'k2', 'a2']])
+    questions = parse_questions_csv(xlsx_to_csv_bytes(data))
+    assert [q['question'] for q in questions] == ['¿Cuántos días?', 'q2']
+    assert questions[0]['reference_answer'] == '' and questions[1]['reference_answer'] == 'a2'
+    with pytest.raises(ValueError, match='not a valid'):
+        xlsx_to_csv_bytes(b'not a workbook')
+
+
 @pytest.fixture
 def snapshot(agent):
     return str(db.config_snapshots_col.insert_one({'agent_id': agent, 'user_id': 'u1', 'name': 's', 'rag_config': {}}).inserted_id)
+
+
+def test_evaluation_accepts_xlsx_upload(client, auth, agent, snapshot, monkeypatch):
+    monkeypatch.setattr('routes.evaluations.run_evaluation', lambda *a, **k: None)
+    xlsx = _xlsx_bytes([['Question', 'Keywords'], ['q', 'k']])
+    data = {'snapshot_id': snapshot, 'file': (io.BytesIO(xlsx), 'd.xlsx')}
+    res = client.post(f'/api/agents/{agent}/evaluations', headers=auth, data=data, content_type='multipart/form-data')
+    assert res.status_code in (200, 201, 202), res.get_json()
 
 
 def start_evaluation(client, auth, agent, snapshot, **form):

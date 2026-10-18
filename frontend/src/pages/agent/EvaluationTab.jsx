@@ -188,17 +188,17 @@ export default function EvaluationTab({ id, api, active }) {
           </div>
 
           <div>
-            <label htmlFor="eval-csv-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Questions dataset (.csv)</label>
+            <label htmlFor="eval-csv-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Questions dataset (.csv or .xlsx)</label>
             <input
               id="eval-csv-input"
               type="file"
-              accept=".csv"
+              accept=".csv,.xlsx"
               ref={evalFileRef}
               required
               className="w-full text-sm"
             />
             <p className="text-xs text-gray-400 mt-1">
-              Columns separated by semicolons: Question;Keywords;Answer (Answer is optional).
+              Columns: Question, Keywords and Answer (Answer is optional), in any order. A .csv can use semicolons or commas; an .xlsx is converted automatically (first sheet, same columns).
             </p>
           </div>
 
