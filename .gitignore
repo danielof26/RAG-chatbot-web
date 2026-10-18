@@ -29,6 +29,8 @@ chromadb_data/
 *.log
 logs/
 
+.coverage
+
 datasets/
 memoria/
 docs/
