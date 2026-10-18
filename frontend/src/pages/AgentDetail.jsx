@@ -9,7 +9,7 @@ import ApiTab from './agent/ApiTab'
 import AdvancedTab from './agent/AdvancedTab'
 import EvaluationTab from './agent/EvaluationTab'
 
-const TABS = ['General', 'Documents', 'Chat', 'API', 'Advanced', 'Evaluation']
+const TABS = ['General', 'Documents', 'Advanced', 'Evaluation', 'Chat', 'API']
 
 export default function AgentDetail() {
   const { id } = useParams()
