@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
+import DownloadDialog from '../../components/DownloadDialog'
+import { downloadRun } from '../../evaluation/exportFormats'
 
 export default function EvaluationTab({ id, api, active }) {
   const [snapshots, setSnapshots] = useState([])
@@ -12,6 +14,7 @@ export default function EvaluationTab({ id, api, active }) {
   const [expandedRunId, setExpandedRunId] = useState('')
   const [expandedRunDetail, setExpandedRunDetail] = useState(null)
   const [chartHoveredIdx, setChartHoveredIdx] = useState(null)
+  const [downloadRunTarget, setDownloadRunTarget] = useState(null)
   const evalFileRef = useRef()
 
   const fetchSnapshots = async () => {
@@ -71,31 +74,16 @@ export default function EvaluationTab({ id, api, active }) {
     if (res.ok) setExpandedRunDetail(await res.json())
   }
 
-  const handleDownloadCSV = async (r) => {
+  const handleDownload = async (formatKeys) => {
+    const r = downloadRunTarget
+    setDownloadRunTarget(null)
     let detail = (expandedRunId === r._id && expandedRunDetail) ? expandedRunDetail : null
     if (!detail) {
       const res = await api.get(`/api/agents/${id}/evaluations/${r._id}`)
       if (!res.ok) return
       detail = await res.json()
     }
-    const perQ = detail.results?.per_question ?? []
-    const rows = [
-      'Question;answer;Binary;Quality;BERT',
-      ...perQ.map(pq => [
-        `"${(pq.question  ?? '').replace(/"/g, '""')}"`,
-        `"${(pq.last_answer ?? '').replace(/"/g, '""')}"`,
-        pq.score?.mean ?? '',
-        pq.rouge1_mean  ?? '',
-        pq.bertscore_mean ?? '',
-      ].join(';'))
-    ].join('\n')
-    const blob = new Blob([rows], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `eval_${r.snapshot_name.replace(/\s+/g,'_')}_${r._id.slice(-6)}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadRun(r, detail, formatKeys)
   }
 
   const handleDeleteRun = async (runId) => {
@@ -293,8 +281,8 @@ export default function EvaluationTab({ id, api, active }) {
                     </button>
                     {r.status === 'done' && (
                       <button
-                        onClick={e => { e.stopPropagation(); handleDownloadCSV(r) }}
-                        title="Download results as CSV"
+                        onClick={e => { e.stopPropagation(); setDownloadRunTarget(r) }}
+                        title="Download results"
                         className="text-gray-400 hover:text-gray-600 transition"
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -468,6 +456,10 @@ export default function EvaluationTab({ id, api, active }) {
           </div>
         )}
       </div>
+
+      {downloadRunTarget && (
+        <DownloadDialog onConfirm={handleDownload} onCancel={() => setDownloadRunTarget(null)} />
+      )}
 
     </div>
   )

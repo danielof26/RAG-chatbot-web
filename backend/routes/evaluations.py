@@ -28,6 +28,8 @@ def _serialize_summary(run):
         'n_exec': run['n_exec'],
         'retrieval_mode': run.get('retrieval_mode', 'naive'),
         'rag_config': run.get('rag_config', {}),
+        'llm_model': run.get('llm_model'),
+        'embed_model': run.get('embed_model'),
         'language': run['language'],
         'num_questions': len(run.get('dataset', [])),
         'created_at': run['created_at'].isoformat(),
@@ -38,8 +40,26 @@ def _serialize_summary(run):
     }
 
 
+def _with_snapshot_settings(run):
+    """Runs created before the settings were stored on the run take them from their snapshot
+    (snapshots are immutable, so it is what the run used). Returns the run unchanged if there is nothing to fill."""
+    if run.get('rag_config') and run.get('llm_model'):
+        return run
+    try:
+        snapshot = config_snapshots_col.find_one({'_id': ObjectId(run['snapshot_id'])})
+    except Exception:
+        snapshot = None
+    if not snapshot:
+        return run
+    filled = dict(run)
+    for field in ('rag_config', 'llm_model', 'embed_model'):
+        if not filled.get(field):
+            filled[field] = snapshot.get(field)
+    return filled
+
+
 def _serialize_detail(run):
-    detail = _serialize_summary(run)
+    detail = _serialize_summary(_with_snapshot_settings(run))
     detail['results'] = run.get('results')
     return detail
 
@@ -136,6 +156,8 @@ def create_evaluation(agent_id, agent):
         'n_exec': n_exec,
         'retrieval_mode': rag_config.retrieval_mode,
         'rag_config': snapshot.get('rag_config', {}),
+        'llm_model': snapshot.get('llm_model'),
+        'embed_model': snapshot.get('embed_model'),
         'status': RunStatus.RUNNING.value,
         'results': None,
         'error': None,
