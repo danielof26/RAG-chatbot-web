@@ -9,7 +9,7 @@ import ApiTab from './agent/ApiTab'
 import AdvancedTab from './agent/AdvancedTab'
 import EvaluationTab from './agent/EvaluationTab'
 
-const TABS = ['Settings', 'Documents', 'Chat', 'API', 'Advanced', 'Evaluation']
+const TABS = ['General', 'Documents', 'Chat', 'API', 'Advanced', 'Evaluation']
 
 export default function AgentDetail() {
   const { id } = useParams()
@@ -17,7 +17,7 @@ export default function AgentDetail() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
 
-  // The active tab lives in the URL (?tab=chat) so a reload keeps it; an unknown value falls back to Settings.
+  // The active tab lives in the URL (?tab=chat) so a reload keeps it; an unknown value falls back to General.
   const activeTab = TABS.find(t => t.toLowerCase() === searchParams.get('tab')) || TABS[0]
   const setActiveTab = (tab) => setSearchParams({ tab: tab.toLowerCase() }, { replace: true })
 
@@ -90,7 +90,7 @@ export default function AgentDetail() {
       {/* Contenido */}
       <div className="max-w-2xl mx-auto px-8 py-10">
 
-        {panel('Settings', <SettingsTab key={agent._id} agent={agent} id={id} api={api} navigate={navigate} llmServers={llmServers} apiKeyRequired={apiKeyRequired} onModelsChange={handleModelsChange} />)}
+        {panel('General', <SettingsTab key={agent._id} agent={agent} id={id} api={api} navigate={navigate} llmServers={llmServers} apiKeyRequired={apiKeyRequired} onModelsChange={handleModelsChange} />)}
         {panel('Documents', <DocumentsTab key={agent._id} agent={agent} id={id} api={api} navigate={navigate} llmServers={llmServers} onDocumentsChange={handleDocumentsChange} onModelsChange={handleModelsChange} />)}
         {panel('Chat', <ChatTab key={agent._id} id={id} api={api} active={activeTab === 'Chat'} />)}
         {panel('API', <ApiTab key={agent._id} id={id} api={api} active={activeTab === 'API'} apiKeyRequired={apiKeyRequired} setApiKeyRequired={setApiKeyRequired} />)}

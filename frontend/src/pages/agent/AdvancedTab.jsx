@@ -62,7 +62,7 @@ export default function AdvancedTab({ agent, id, api, catalog, llmServers }) {
   return (
     <div className="space-y-4">
 
-      {/* Models currently configured (changed in Settings / Documents) */}
+      {/* Models currently configured (changed in General / Documents) */}
       <div className="border border-gray-100 rounded-xl px-5 py-4 grid grid-cols-2 gap-4">
         {[
           ['LLM model', agent.llm_model, agent.llm_server_id],
