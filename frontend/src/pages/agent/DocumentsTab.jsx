@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 
-export default function DocumentsTab({ agent, id, api, navigate, llmServers, onDocumentsChange }) {
+export default function DocumentsTab({ agent, id, api, navigate, llmServers, onDocumentsChange, onModelsChange }) {
   const [embedServerId, setEmbedServerId] = useState(agent.embed_server_id || '')
   const [embedModel, setEmbedModel] = useState(agent.embed_model || '')
   const [availableEmbedModels, setAvailableEmbedModels] = useState([])
@@ -57,7 +57,10 @@ export default function DocumentsTab({ agent, id, api, navigate, llmServers, onD
       })
     setSavingEmbed(false)
     setEmbedSaveMsg(res.ok ? 'Saved!' : 'Error saving')
-    if (res.ok) setTimeout(() => setEmbedSaveMsg(''), 2000)
+    if (res.ok) {
+      onModelsChange({ embed_server_id: embedServerId || null, embed_model: embedModel })
+      setTimeout(() => setEmbedSaveMsg(''), 2000)
+    }
   }
 
   // Cuando cambia el servidor de embeddings, carga sus modelos

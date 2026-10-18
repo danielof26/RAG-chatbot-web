@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { techsFromRagConfig, computeRetrievalMode, computeSynthesisMode, blockedTechsFor, toggleTechSet } from '../../rag/techniques'
 
-export default function AdvancedTab({ agent, id, api, catalog }) {
+export default function AdvancedTab({ agent, id, api, catalog, llmServers }) {
   const [topK, setTopK] = useState(agent.rag_config?.similarity_top_k ?? 5)
   const [chunkSize, setChunkSize] = useState(agent.rag_config?.chunk_size ?? 512)
   const [chunkOverlap, setChunkOverlap] = useState(agent.rag_config?.chunk_overlap ?? 50)
@@ -61,6 +61,22 @@ export default function AdvancedTab({ agent, id, api, catalog }) {
 
   return (
     <div className="space-y-4">
+
+      {/* Models currently configured (changed in Settings / Documents) */}
+      <div className="border border-gray-100 rounded-xl px-5 py-4 grid grid-cols-2 gap-4">
+        {[
+          ['LLM model', agent.llm_model, agent.llm_server_id],
+          ['Embedding model', agent.embed_model, agent.embed_server_id],
+        ].map(([label, model, serverId]) => (
+          <div key={label}>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">{label}</p>
+            <p className="text-sm text-gray-700">{model || <span className="text-gray-300">Not configured</span>}</p>
+            {serverId && (
+              <p className="text-xs text-gray-400">{llmServers.find(s => s._id === serverId)?.name ?? ''}</p>
+            )}
+          </div>
+        ))}
+      </div>
 
       {catalog.sections.map(section => (
         <div key={section.id} className="border border-gray-100 rounded-xl px-5 py-4 space-y-3">

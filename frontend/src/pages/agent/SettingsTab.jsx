@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 
-export default function SettingsTab({ agent, id, api, navigate, llmServers, apiKeyRequired }) {
+export default function SettingsTab({ agent, id, api, navigate, llmServers, apiKeyRequired, onModelsChange }) {
   const [name, setName] = useState(agent.name || '')
   const [description, setDescription] = useState(agent.description || '')
   const [prompt, setPrompt] = useState(agent.prompt || '')
@@ -22,6 +22,7 @@ export default function SettingsTab({ agent, id, api, navigate, llmServers, apiK
       })
     setSaving(false)
     if (res.ok) {
+      onModelsChange({ llm_server_id: llmServerId || null, llm_model: llmModel })
       setSaveMsg('Saved!')
       setTimeout(() => setSaveMsg(''), 2000)
     } else {

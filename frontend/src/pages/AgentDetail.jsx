@@ -49,6 +49,7 @@ export default function AgentDetail() {
   // Tabs stay mounted (only hidden) so what you typed and haven't saved survives switching tabs.
   // key={agent._id} remounts them, re-reading their initial values, when the route points to another agent.
   const handleDocumentsChange = (documents) => setAgent(prev => prev && { ...prev, documents })
+  const handleModelsChange = (patch) => setAgent(prev => prev && { ...prev, ...patch })
   const panel = (tab, content) => <div hidden={activeTab !== tab}>{content}</div>
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-sm text-gray-400">Loading...</div>
@@ -89,11 +90,11 @@ export default function AgentDetail() {
       {/* Contenido */}
       <div className="max-w-2xl mx-auto px-8 py-10">
 
-        {panel('Settings', <SettingsTab key={agent._id} agent={agent} id={id} api={api} navigate={navigate} llmServers={llmServers} apiKeyRequired={apiKeyRequired} />)}
-        {panel('Documents', <DocumentsTab key={agent._id} agent={agent} id={id} api={api} navigate={navigate} llmServers={llmServers} onDocumentsChange={handleDocumentsChange} />)}
+        {panel('Settings', <SettingsTab key={agent._id} agent={agent} id={id} api={api} navigate={navigate} llmServers={llmServers} apiKeyRequired={apiKeyRequired} onModelsChange={handleModelsChange} />)}
+        {panel('Documents', <DocumentsTab key={agent._id} agent={agent} id={id} api={api} navigate={navigate} llmServers={llmServers} onDocumentsChange={handleDocumentsChange} onModelsChange={handleModelsChange} />)}
         {panel('Chat', <ChatTab key={agent._id} id={id} api={api} active={activeTab === 'Chat'} />)}
         {panel('API', <ApiTab key={agent._id} id={id} api={api} active={activeTab === 'API'} apiKeyRequired={apiKeyRequired} setApiKeyRequired={setApiKeyRequired} />)}
-        {panel('Advanced', <AdvancedTab key={agent._id} agent={agent} id={id} api={api} catalog={catalog} />)}
+        {panel('Advanced', <AdvancedTab key={agent._id} agent={agent} id={id} api={api} catalog={catalog} llmServers={llmServers} />)}
         {panel('Evaluation', <EvaluationTab key={agent._id} id={id} api={api} active={activeTab === 'Evaluation'} />)}
 
       </div>
