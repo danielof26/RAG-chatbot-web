@@ -127,6 +127,7 @@ def test_hyde_combined_mixes_the_question_and_the_hypothetical(evaluate):
 def test_step_back_retrieves_with_the_question_and_its_abstraction(evaluate):
     _, _, llm = evaluate('step_back')
     assert 'Eiffel Tower' in llm.prompts('step_back')[0]
+    assert 'same language as the question' in llm.prompts('step_back')[0]
     combined = ' '.join(chunks_in_answer_prompts(llm))
     assert 'Eiffel' in combined or 'Paris' in combined
     assert any(w in combined.lower() for w in ('lava', 'volcano', 'magma', 'vesuvius', 'eruption'))

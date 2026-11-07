@@ -26,8 +26,8 @@ def _generate_hypothetical(question: str, llm) -> str:
 def _generate_step_back(question: str, llm) -> str:
     return str(llm.complete(
         f"Rewrite the question below as a more general, higher-level question about the underlying concept "
-        f"or principle, so that background knowledge can be retrieved for it. Reply with only the rewritten "
-        f"question.\n\nQuestion: {question}\n\nGeneral question:"
+        f"or principle, so that background knowledge can be retrieved for it. Write it in the same language as the "
+        f"question. Reply with only the rewritten question.\n\nQuestion: {question}\n\nGeneral question:"
     )).strip()
 
 
