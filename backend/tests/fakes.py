@@ -21,6 +21,7 @@ _PROMPT_KINDS = (
     ('Evaluate this answer. Reply with ONLY a JSON', 'selfrag_eval'),
     ('Rewrite the answer fixing the problems', 'selfrag_rewrite'),
     ('Write a short, factual answer', 'hyde'),
+    ('Rewrite the question below as a more general', 'step_back'),
     ('Using only the choices above', 'router_select'),
     ('output a list of relevant sub-questions', 'subq_gen'),
     ('Summarize the provided text', 'raptor_summary'),
@@ -45,6 +46,7 @@ class HashEmbedding(BaseEmbedding):
 class ScriptedLLM(CustomLLM):
     calls: list = Field(default_factory=list)      # [(kind, prompt)]
     hypothetical: str = 'volcano eruption lava magma crater'
+    step_back: str = 'volcano eruption lava magma crater'   # abstract question the Step-back prompt returns
     cite: bool = False                              # answer with a verifiable [Source: ...] citation
     quotes: list = Field(default_factory=list)      # citations already given (see _quote_from_context)
     invent: str = ''                                # answer with a citation that is NOT in the documents
@@ -99,6 +101,8 @@ class ScriptedLLM(CustomLLM):
             return '{"supported": false, "missing_info": "m", "issues": ["i"]}'
         if kind == 'hyde':
             return self.hypothetical
+        if kind == 'step_back':
+            return self.step_back
         if kind == 'router_select':
             return json.dumps([{'choice': 1, 'reason': 'simple factual question'}])
         if kind == 'subq_gen':

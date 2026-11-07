@@ -30,7 +30,7 @@ DOCS = {
                    'Pasta is cooked in boiling salted water. Tomato sauce needs garlic and basil.',
 }
 
-ALL_MODES = ['naive', 'hyde_answer', 'hyde_combined', 'crag', 'self_rag', 'bm25', 'fusion', 'router', 'sub_question', 'raptor']
+ALL_MODES = ['naive', 'hyde_answer', 'hyde_combined', 'step_back', 'crag', 'self_rag', 'bm25', 'fusion', 'router', 'sub_question', 'raptor']
 
 
 @pytest.fixture
@@ -84,6 +84,7 @@ SIGNATURES = {
     'raptor':        {'answer': 1},
     'hyde_answer':   {'hyde': 1, 'answer': 1},
     'hyde_combined': {'hyde': 1, 'answer': 1},
+    'step_back':     {'step_back': 1, 'answer': 1},
     'crag':          {'crag_grade': TOP_K, 'crag_answer': 1},                     # grades every retrieved chunk
     'self_rag':      {'answer': 1, 'selfrag_eval': 1, 'selfrag_rewrite': 1},     # critique -> rewrite
     'router':        {'router_select': 1, 'answer': 1},
@@ -119,6 +120,14 @@ def test_hyde_retrieves_with_the_hypothetical_answer_not_the_question(evaluate):
 
 def test_hyde_combined_mixes_the_question_and_the_hypothetical(evaluate):
     combined = ' '.join(chunks_in_answer_prompts(evaluate('hyde_combined')[2]))
+    assert 'Eiffel' in combined or 'Paris' in combined
+    assert any(w in combined.lower() for w in ('lava', 'volcano', 'magma', 'vesuvius', 'eruption'))
+
+
+def test_step_back_retrieves_with_the_question_and_its_abstraction(evaluate):
+    _, _, llm = evaluate('step_back')
+    assert 'Eiffel Tower' in llm.prompts('step_back')[0]
+    combined = ' '.join(chunks_in_answer_prompts(llm))
     assert 'Eiffel' in combined or 'Paris' in combined
     assert any(w in combined.lower() for w in ('lava', 'volcano', 'magma', 'vesuvius', 'eruption'))
 

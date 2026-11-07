@@ -22,6 +22,14 @@ def _generate_hypothetical(question: str, llm) -> str:
     )).strip()
 
 
+def _generate_step_back(question: str, llm) -> str:
+    return str(llm.complete(
+        f"Rewrite the question below as a more general, higher-level question about the underlying concept "
+        f"or principle, so that background knowledge can be retrieved for it. Reply with only the rewritten "
+        f"question.\n\nQuestion: {question}\n\nGeneral question:"
+    )).strip()
+
+
 class _CRAGResponse:
     """Minimal response wrapper so CRAG output is compatible with _write_xai_trace."""
     def __init__(self, nodes):
@@ -78,6 +86,14 @@ class HyDECombinedStrategy(QueryStrategy):
     def build_query(self, question: str, llm) -> QueryBundle:
         hypothetical = _generate_hypothetical(question, llm)
         return QueryBundle(query_str=question, custom_embedding_strs=[question, hypothetical])
+
+
+class StepBackStrategy(QueryStrategy):
+    """Step-back prompting: retrieves with both the question and a more abstract version of it, so the
+    answer gets the specific passages and the background ones."""
+    def build_query(self, question: str, llm) -> QueryBundle:
+        step_back = _generate_step_back(question, llm)
+        return QueryBundle(query_str=question, custom_embedding_strs=[question, step_back])
 
 
 class CRAGStrategy(QueryStrategy):
@@ -176,6 +192,7 @@ _STRATEGIES = {
     'naive':         NaiveStrategy,
     'hyde_answer':   HyDEAnswerStrategy,
     'hyde_combined': HyDECombinedStrategy,
+    'step_back':     StepBackStrategy,
     'crag':          CRAGStrategy,
     'self_rag':      lambda: SelfRAGDecorator(NaiveStrategy()),
 }
