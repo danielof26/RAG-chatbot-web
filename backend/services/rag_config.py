@@ -17,6 +17,7 @@ class RagConfig:
     rerank: bool = False
     rerank_top_n: int = 3
     fusion_num_queries: int = 1
+    multi_query_num_queries: int = 3
     xai: bool = False
     long_reorder: bool = False
     conv_memory: bool = False
@@ -44,6 +45,7 @@ _NUMBERS = {
     'similarity_cutoff': (float, 0, 1),
     'rerank_top_n': (int, 1, 50),
     'fusion_num_queries': (int, 1, 10),
+    'multi_query_num_queries': (int, 2, 10),
     'conv_memory_turns': (int, 1, 20),
 }
 _BOOLEANS = ('sim_filter', 'rerank', 'xai', 'long_reorder', 'conv_memory')

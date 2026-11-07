@@ -388,6 +388,35 @@ def _build_fusion_engine(index, chroma_collection, llm, top_k: int, top_q: int, 
                                            node_postprocessors=node_postprocessors or [])
 
 
+_MULTI_QUERY_PROMPT = (
+    "You are a helpful assistant that generates multiple search queries based on a single input query. "
+    "Generate {num_queries} search queries, one on each line, related to the following input query. "
+    "Write them in the same language as the input query.\n"
+    "Query: {query}\n"
+    "Queries:\n"
+)
+
+
+def _build_multi_query_engine(index, llm, top_k: int, num_queries: int, synthesis_mode: str = 'compact', node_postprocessors=None):
+    """Multi-Query: the LLM writes reformulations of the question, each one is retrieved on its own against the
+    vector index, and the rankings are merged with reciprocal rank fusion. `num_queries` counts the original too."""
+    from llama_index.core.retrievers import QueryFusionRetriever
+    from llama_index.core.query_engine import RetrieverQueryEngine
+
+    multi_query_retriever = QueryFusionRetriever(
+        [index.as_retriever(similarity_top_k=top_k)],
+        llm=llm,
+        query_gen_prompt=_MULTI_QUERY_PROMPT,
+        similarity_top_k=top_k,
+        num_queries=num_queries,
+        mode="reciprocal_rerank",
+        use_async=False,
+        verbose=True,
+    )
+    return RetrieverQueryEngine.from_args(multi_query_retriever, llm=llm, response_mode=synthesis_mode,
+                                           node_postprocessors=node_postprocessors or [])
+
+
 @dataclass
 class EngineContext:
     """Everything an engine builder may need; shared by the chat path and the evaluation path."""
@@ -398,6 +427,7 @@ class EngineContext:
     collection_key: str          # "agent_{id}" in chat, "eval_{run_id}" in evaluation (names the RAPTOR tree)
     top_k: int = 5
     top_q: int = 1               # fusion_num_queries
+    multi_query_num: int = 3     # multi_query_num_queries
     synthesis_mode: str = 'compact'
     postprocessors: list = field(default_factory=list)
     streaming: bool = False
@@ -451,6 +481,12 @@ def _fusion_engine(ctx):
                                  synthesis_mode=ctx.synthesis_mode, node_postprocessors=ctx.postprocessors)
 
 
+@_register_engine('multi_query')
+def _multi_query_engine(ctx):
+    return _build_multi_query_engine(ctx.index, ctx.llm, ctx.top_k, ctx.multi_query_num,
+                                     synthesis_mode=ctx.synthesis_mode, node_postprocessors=ctx.postprocessors)
+
+
 @_register_engine('raptor')
 def _raptor_engine(ctx):
     return _build_raptor_engine(ctx.collection_key, ctx.chroma_collection, ctx.llm, ctx.embed_model, ctx.top_k, ctx.synthesis_mode,
@@ -480,7 +516,7 @@ def build_query_engine(retrieval_mode: str, ctx: EngineContext):
 
 # Modes whose answer is produced by strategy.execute() in one piece (custom engines, or strategies
 # that retrieve/critique on their own), so they cannot stream token by token.
-NON_STREAMING_MODES = frozenset({'crag', 'self_rag', 'router', 'fusion', 'raptor', 'sub_question', 'bm25'})
+NON_STREAMING_MODES = frozenset({'crag', 'self_rag', 'router', 'fusion', 'raptor', 'sub_question', 'bm25', 'multi_query'})
 
 
 def query_agent(agent_id: str, question: str, agent_config: dict, chat_history: list = None) -> str:
@@ -520,6 +556,7 @@ def query_agent(agent_id: str, question: str, agent_config: dict, chat_history: 
         index=index, chroma_collection=chroma_collection, llm=models.llm, embed_model=models.embed_model,
         collection_key=f"agent_{agent_id}",
         top_k=rag_config.similarity_top_k, top_q=rag_config.fusion_num_queries,
+        multi_query_num=rag_config.multi_query_num_queries,
         synthesis_mode=rag_config.synthesis_mode,
         postprocessors=build_postprocessors(rag_config.effective_cutoff, rag_config.rerank,
                                             rag_config.rerank_top_n, rag_config.long_reorder),
@@ -571,6 +608,7 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict, chat_hi
         index=index, chroma_collection=chroma_collection, llm=models.llm, embed_model=models.embed_model,
         collection_key=f"agent_{agent_id}",
         top_k=rag_config.similarity_top_k, top_q=rag_config.fusion_num_queries,
+        multi_query_num=rag_config.multi_query_num_queries,
         synthesis_mode=rag_config.synthesis_mode,
         postprocessors=build_postprocessors(rag_config.effective_cutoff, rag_config.rerank,
                                             rag_config.rerank_top_n, rag_config.long_reorder),

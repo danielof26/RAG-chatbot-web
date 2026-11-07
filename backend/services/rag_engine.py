@@ -10,11 +10,11 @@ from services.rag_service import EngineContext, build_postprocessors, build_quer
 def setup_rag(llm_provider, embed_provider, model_name, embed_model, file_paths, chroma_path, chroma_col,
               prompt, chunk_size=1024, chunk_overlap=200, top_k=15, temperature=0.1, synthesis_mode='compact',
               similarity_cutoff=None, rerank=False, rerank_top_n=3, retrieval_mode='naive',
-              fusion_num_queries=1, long_reorder=False):
+              fusion_num_queries=1, multi_query_num_queries=3, long_reorder=False):
     """
     Initialises the LLM, embedding model, ChromaDB vector store and LlamaIndex query engine.
     Dispatches on retrieval_mode using the same engine builders as rag_service.py (chat path),
-    so evaluations exercise the real router/fusion/raptor/sub_question/bm25 engines instead of
+    so evaluations exercise the real router/fusion/multi_query/raptor/sub_question/bm25 engines instead of
     always falling back to the plain vector engine.
     """
     llm = llm_provider.build_llm(model=model_name, system_prompt=prompt, temperature=temperature)
@@ -35,7 +35,7 @@ def setup_rag(llm_provider, embed_provider, model_name, embed_model, file_paths,
 
     ctx = EngineContext(
         index=index, chroma_collection=chroma_collection, llm=llm, embed_model=embedder, collection_key=chroma_col,
-        top_k=top_k, top_q=fusion_num_queries, synthesis_mode=synthesis_mode,
+        top_k=top_k, top_q=fusion_num_queries, multi_query_num=multi_query_num_queries, synthesis_mode=synthesis_mode,
         postprocessors=build_postprocessors(similarity_cutoff, rerank, rerank_top_n, long_reorder),
     )
     query_engine = build_query_engine(retrieval_mode, ctx)

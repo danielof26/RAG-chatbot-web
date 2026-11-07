@@ -203,6 +203,7 @@ def _build_query_engine(run_id: str, agent: dict, snapshot: dict, file_paths: li
         rerank_top_n=rag_config.rerank_top_n,
         retrieval_mode=rag_config.retrieval_mode,
         fusion_num_queries=rag_config.fusion_num_queries,
+        multi_query_num_queries=rag_config.multi_query_num_queries,
         long_reorder=rag_config.long_reorder,
     )
 

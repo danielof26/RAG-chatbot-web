@@ -22,6 +22,7 @@ _PROMPT_KINDS = (
     ('Rewrite the answer fixing the problems', 'selfrag_rewrite'),
     ('Write a short, factual answer', 'hyde'),
     ('Rewrite the question below as a more general', 'step_back'),
+    ('generates multiple search queries', 'multi_query_gen'),
     ('Using only the choices above', 'router_select'),
     ('output a list of relevant sub-questions', 'subq_gen'),
     ('Summarize the provided text', 'raptor_summary'),
@@ -47,6 +48,7 @@ class ScriptedLLM(CustomLLM):
     calls: list = Field(default_factory=list)      # [(kind, prompt)]
     hypothetical: str = 'volcano eruption lava magma crater'
     step_back: str = 'volcano eruption lava magma crater'   # abstract question the Step-back prompt returns
+    variants: str = 'volcano eruption lava magma crater\nParis landmark'   # reformulations the Multi-Query prompt returns, one per line
     cite: bool = False                              # answer with a verifiable [Source: ...] citation
     quotes: list = Field(default_factory=list)      # citations already given (see _quote_from_context)
     invent: str = ''                                # answer with a citation that is NOT in the documents
@@ -103,6 +105,8 @@ class ScriptedLLM(CustomLLM):
             return self.hypothetical
         if kind == 'step_back':
             return self.step_back
+        if kind == 'multi_query_gen':
+            return self.variants
         if kind == 'router_select':
             return json.dumps([{'choice': 1, 'reason': 'simple factual question'}])
         if kind == 'subq_gen':

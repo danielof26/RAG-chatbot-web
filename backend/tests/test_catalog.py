@@ -37,7 +37,7 @@ def test_engines_that_ignore_synthesis_lock_the_other_modes(tech, synthesis):
     assert locked(tech, synthesis)
 
 
-@pytest.mark.parametrize('tech', ['fusion', 'bm25'])
+@pytest.mark.parametrize('tech', ['fusion', 'bm25', 'multi_query'])
 def test_similarity_filter_is_locked_for_non_cosine_scores(tech):
     assert locked('sim_filter', tech)
 

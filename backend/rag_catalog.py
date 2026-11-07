@@ -25,8 +25,8 @@ SECTIONS = [
              'desc': 'Generates a hypothetical answer and uses its embedding as the retrieval query.'},
             {'id': 'hyde_combined', 'label': 'HyDE Combined', 'impl': True, 'incompat': ['naive', 'hyde_answer', 'crag'],
              'desc': 'Embeds both the original question and a hypothetical answer for retrieval.'},
-            {'id': 'multi_query', 'label': 'Multi-Query', 'impl': False, 'incompat': [],
-             'desc': 'Generates N reformulations of the question and fuses all results to improve recall.'},
+            {'id': 'multi_query', 'label': 'Multi-Query', 'impl': True, 'incompat': ['naive', 'hyde_answer', 'hyde_combined', 'crag', 'self_rag', 'router', 'sub_question', 'fusion', 'raptor', 'bm25', 'step_back', 'sim_filter'],
+             'desc': 'Generates several reformulations of the question, retrieves with each one separately and fuses the rankings (reciprocal rank fusion) to improve recall. Fusion scores are not cosine scores, so the similarity filter is locked.'},
             {'id': 'step_back', 'label': 'Step-back Prompting', 'impl': True, 'incompat': ['naive', 'hyde_answer', 'hyde_combined', 'crag', 'self_rag', 'router', 'sub_question', 'fusion', 'raptor', 'bm25'],
              'desc': 'Abstracts the question to a higher-level concept and retrieves with both the original and the abstract version, so the answer gets the specific passages and the background ones.'},
             {'id': 'sub_question', 'label': 'Sub-question Engine', 'impl': True, 'incompat': ['hyde_answer', 'hyde_combined', 'crag', 'self_rag', 'router', 'fusion', 'raptor'],
@@ -142,6 +142,7 @@ MODE_TECHS = {
     'hyde_answer': ['hyde_answer', 'compact'],
     'hyde_combined': ['hyde_combined', 'compact'],
     'step_back': ['step_back', 'compact'],
+    'multi_query': ['multi_query', 'compact'],
     'self_rag': ['naive', 'self_rag', 'compact'],
     'router': ['router', 'compact'],
     'fusion': ['fusion', 'compact'],
@@ -151,7 +152,7 @@ MODE_TECHS = {
 }
 
 # When several techniques are selected, the first one found here decides retrieval_mode / synthesis_mode
-MODE_PRIORITY = ['crag', 'self_rag', 'router', 'sub_question', 'raptor', 'fusion', 'bm25', 'step_back', 'hyde_combined', 'hyde_answer', 'naive']
+MODE_PRIORITY = ['crag', 'self_rag', 'router', 'sub_question', 'raptor', 'fusion', 'bm25', 'multi_query', 'step_back', 'hyde_combined', 'hyde_answer', 'naive']
 SYNTHESIS_PRIORITY = ['refine', 'tree_summarize', 'simple_summarize', 'accumulate', 'compact']
 
 
