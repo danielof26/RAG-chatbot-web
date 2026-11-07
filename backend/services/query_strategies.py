@@ -4,6 +4,7 @@ from llama_index.core import QueryBundle
 from llama_index.core.query_engine import RetrieverQueryEngine
 
 _SELF_RAG_DEBUG = True  # set to False to disable Self-RAG evaluation logging
+_STEP_BACK_DEBUG = True  # set to False to disable Step-back query logging
 
 
 def _to_text(text) -> str:
@@ -93,6 +94,8 @@ class StepBackStrategy(QueryStrategy):
     answer gets the specific passages and the background ones."""
     def build_query(self, question: str, llm) -> QueryBundle:
         step_back = _generate_step_back(question, llm)
+        if _STEP_BACK_DEBUG:
+            print(f"[Step-back] {question!r} -> {step_back!r}")
         return QueryBundle(query_str=question, custom_embedding_strs=[question, step_back])
 
 
