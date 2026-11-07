@@ -13,6 +13,7 @@ export const configEntries = (cfg = {}, { llmModel, embedModel } = {}) => [
   cfg.chunk_size != null && ['chunk', `${cfg.chunk_size}/${cfg.chunk_overlap ?? 0}`],
   ['retrieval', cfg.retrieval_mode],
   cfg.retrieval_mode === 'fusion' && cfg.fusion_num_queries != null && ['fusion_queries', cfg.fusion_num_queries],
+  cfg.retrieval_mode === 'multi_query' && cfg.multi_query_num_queries != null && ['multi_query_queries', cfg.multi_query_num_queries],
   ['top_k', cfg.similarity_top_k],
   cfg.sim_filter && ['sim_filter', cfg.similarity_cutoff ?? true],
   cfg.rerank && ['rerank', true],

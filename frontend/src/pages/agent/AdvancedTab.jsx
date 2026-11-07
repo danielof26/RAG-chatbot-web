@@ -9,6 +9,7 @@ export default function AdvancedTab({ agent, id, api, catalog, llmServers }) {
   const [similarityCutoff, setSimilarityCutoff] = useState(agent.rag_config?.similarity_cutoff ?? 0.7)
   const [rerankTopN, setRerankTopN] = useState(agent.rag_config?.rerank_top_n ?? 3)
   const [fusionNumQueries, setFusionNumQueries] = useState(agent.rag_config?.fusion_num_queries ?? 1)
+  const [multiQueryNumQueries, setMultiQueryNumQueries] = useState(agent.rag_config?.multi_query_num_queries ?? 3)
   const [selectedTechs, setSelectedTechs] = useState(techsFromRagConfig(catalog, agent.rag_config))
   const [savingAdvanced, setSavingAdvanced] = useState(false)
   const [advancedSaveMsg, setAdvancedSaveMsg] = useState('')
@@ -33,6 +34,7 @@ export default function AdvancedTab({ agent, id, api, catalog, llmServers }) {
           rerank: selectedTechs.has('rerank_ce'),
           rerank_top_n: Number(rerankTopN),
           fusion_num_queries: Number(fusionNumQueries),
+          multi_query_num_queries: Number(multiQueryNumQueries),
           xai: selectedTechs.has('xai'),
           long_reorder: selectedTechs.has('long_reorder'),
           conv_memory: convMemory,
@@ -153,6 +155,21 @@ export default function AdvancedTab({ agent, id, api, catalog, llmServers }) {
                 className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
               />
               <p className="text-xs text-gray-400 mt-1">Number of query variants the LLM generates before fusing results. 1 = no variants (faster), 4 = richer recall.</p>
+            </div>
+          )}
+
+          {/* Pre-retrieval: multi-query number of queries (only when multi-query active) */}
+          {section.id === 'pre' && selectedTechs.has('multi_query') && (
+            <div className="pt-1 border-t border-gray-50">
+              <label htmlFor="multi-query-num-queries-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 mt-3">Number of Queries</label>
+              <input
+                id="multi-query-num-queries-input"
+                type="number" min="2" max="10"
+                value={multiQueryNumQueries}
+                onChange={e => setMultiQueryNumQueries(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+              />
+              <p className="text-xs text-gray-400 mt-1">Total queries retrieved per question, counting the original: 3 = the question plus 2 LLM reformulations. More queries = better recall, slower answers.</p>
             </div>
           )}
 
