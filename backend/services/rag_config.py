@@ -1,6 +1,8 @@
 from dataclasses import dataclass, fields
 
 from rag_catalog import MODE_PRIORITY, SYNTHESIS_PRIORITY
+from services.chunking import CHUNK_STRATEGIES, DEFAULT_CHUNK_STRATEGY
+from services.index_types import DEFAULT_INDEX_TYPE, INDEX_TYPES
 
 
 @dataclass(frozen=True)
@@ -9,6 +11,8 @@ class RagConfig:
     similarity_top_k: int = 5
     chunk_size: int = 512
     chunk_overlap: int = 50
+    chunk_strategy: str = DEFAULT_CHUNK_STRATEGY
+    index_type: str = DEFAULT_INDEX_TYPE
     temperature: float = 0.1
     retrieval_mode: str = 'naive'
     synthesis_mode: str = 'compact'
@@ -50,6 +54,8 @@ _NUMBERS = {
 }
 _BOOLEANS = ('sim_filter', 'rerank', 'xai', 'long_reorder', 'conv_memory')
 _CHOICES = {
+    'chunk_strategy': list(CHUNK_STRATEGIES),
+    'index_type': list(INDEX_TYPES),
     'retrieval_mode': MODE_PRIORITY,
     'synthesis_mode': SYNTHESIS_PRIORITY,
     'conv_memory_mode': ['simple', 'condense'],
@@ -79,6 +85,12 @@ def validate_rag_config(data):
     for name, allowed in _CHOICES.items():
         if name in data and data[name] not in allowed:
             return f'{name} must be one of: {", ".join(allowed)}'
+    if data.get('index_type', DEFAULT_INDEX_TYPE) != DEFAULT_INDEX_TYPE:
+        # Those indexes bring their own retriever and return no cosine scores
+        if data.get('retrieval_mode', 'naive') != 'naive':
+            return f'retrieval_mode must be naive with index_type {data["index_type"]}'
+        if data.get('sim_filter'):
+            return f'sim_filter cannot be used with index_type {data["index_type"]}'
     if data.get('chunk_overlap', 0) >= data.get('chunk_size', 512):
         return 'chunk_overlap must be smaller than chunk_size'
     return None

@@ -5,6 +5,9 @@ cannot be combined. Declare each incompatibility on one side only; get_catalog()
 `impl` must be True only for techniques the backend can run (see _register_engine in rag_service.py and
 query_strategies.py).
 
+A section with a `config_key` is a "choose one" group saved as that single rag_config value (the id of the
+selected technique, or the section's `fallback` when none is). Its techniques are mutually exclusive.
+
 Rules the incompatibilities encode (tests/test_catalog.py enforces them):
 - The retrieval techniques in MODE_PRIORITY collapse into ONE retrieval_mode when saved, so any two of them
   (naive aside, which is a no-op) must be locked against each other; otherwise one would be dropped silently.
@@ -12,6 +15,12 @@ Rules the incompatibilities encode (tests/test_catalog.py enforces them):
 - The similarity filter compares against 0-1 cosine scores; Fusion (RRF, ~0.016) and BM25 use other scales.
 """
 import copy
+
+# What cannot run over a non-vector index: the retrieval modes (naive is the plain retriever of any index)
+# and the similarity filter, because those indexes return no cosine scores.
+NEEDS_VECTOR_INDEX = ['crag', 'self_rag', 'router', 'sub_question', 'raptor', 'fusion', 'bm25', 'multi_query', 'step_back',
+                      'hyde_combined', 'hyde_answer', 'sim_filter']
+NON_COMPACT_SYNTHESIS = ['refine', 'tree_summarize', 'simple_summarize', 'accumulate']
 
 SECTIONS = [
     {
@@ -36,33 +45,33 @@ SECTIONS = [
         ],
     },
     {
-        'id': 'idx', 'num': 2,
+        'id': 'idx', 'num': 2, 'config_key': 'index_type', 'fallback': 'vector_index',
         'title': 'Indexing · Knowledge base structure',
-        'desc': 'How documents are organized in the index. Choose one per collection — mutually exclusive.',
+        'desc': 'How the chunks are organized for retrieval. Choose one — mutually exclusive. The non-vector indexes are built from the stored chunks, so a change applies right away; they bring their own retriever, so the retrieval techniques that need the vector index are locked.',
         'techniques': [
             {'id': 'vector_index', 'label': 'Vector Store Index', 'impl': True, 'incompat': ['summary_index', 'tree_index', 'keyword_index', 'kg_index'],
              'desc': 'Dense semantic index — the standard choice for most RAG pipelines.'},
-            {'id': 'summary_index', 'label': 'Summary Index (List)', 'impl': False, 'incompat': ['vector_index', 'tree_index', 'keyword_index', 'kg_index'],
-             'desc': 'Indexes document summaries, useful for high-level summarization queries.'},
+            {'id': 'summary_index', 'label': 'Summary Index (List)', 'impl': True, 'incompat': ['vector_index', 'tree_index', 'keyword_index', 'kg_index'] + NEEDS_VECTOR_INDEX + NON_COMPACT_SYNTHESIS,
+             'desc': 'Keeps every chunk in a list and hands ALL of them to the LLM, which builds the answer bottom-up (tree summarize). Meant for summarization and whole-collection questions; Top K does not apply, and it costs one LLM call per group of chunks, so use it on small collections. It builds its own synthesis.'},
             {'id': 'tree_index', 'label': 'Tree Index', 'impl': False, 'incompat': ['vector_index', 'summary_index', 'keyword_index', 'kg_index'],
              'desc': 'Hierarchical index built by recursively summarizing chunks up a tree.'},
-            {'id': 'keyword_index', 'label': 'Keyword Table Index', 'impl': False, 'incompat': ['vector_index', 'summary_index', 'tree_index', 'kg_index'],
-             'desc': 'Keyword-based index, precise for exact-match technical retrieval.'},
+            {'id': 'keyword_index', 'label': 'Keyword Table Index', 'impl': True, 'incompat': ['vector_index', 'summary_index', 'tree_index', 'kg_index'] + NEEDS_VECTOR_INDEX,
+             'desc': 'Maps keywords extracted from each chunk (no embeddings, no LLM) to the chunks that contain them, and retrieves the ones sharing the most keywords with the question. Precise for exact-match technical terms.'},
             {'id': 'kg_index', 'label': 'Knowledge Graph Index', 'impl': False, 'incompat': ['vector_index', 'summary_index', 'tree_index', 'keyword_index'],
              'desc': 'Graph-based index for documents with rich entity relationships.'},
         ],
     },
     {
-        'id': 'chunk', 'num': 3,
+        'id': 'chunk', 'num': 3, 'config_key': 'chunk_strategy', 'fallback': 'fixed_size',
         'title': 'Chunking · Document preprocessing',
-        'desc': 'How documents are split before indexing. Choose one. Changes apply only when re-indexing.',
+        'desc': 'How documents are split before indexing. Choose one. Changes apply only to documents indexed afterwards: re-index the existing ones.',
         'techniques': [
             {'id': 'fixed_size', 'label': 'Fixed-size', 'impl': True, 'incompat': ['sent_window', 'semantic_chunk', 'hierarchical'],
              'desc': 'Splits by token count. Configure size and overlap in the fields below.'},
-            {'id': 'sent_window', 'label': 'Sentence window', 'impl': False, 'incompat': ['fixed_size', 'semantic_chunk', 'hierarchical'],
-             'desc': 'Chunks by sentence and retrieves with a surrounding context window.'},
-            {'id': 'semantic_chunk', 'label': 'Semantic chunking', 'impl': False, 'incompat': ['fixed_size', 'sent_window', 'hierarchical'],
-             'desc': 'Splits at semantic boundaries detected by embedding similarity.'},
+            {'id': 'sent_window', 'label': 'Sentence window', 'impl': True, 'incompat': ['fixed_size', 'semantic_chunk', 'hierarchical'],
+             'desc': 'Embeds one sentence at a time for a precise match, and gives the LLM the sentence together with the 3 sentences on each side. Chunk size and overlap do not apply.'},
+            {'id': 'semantic_chunk', 'label': 'Semantic chunking', 'impl': True, 'incompat': ['fixed_size', 'sent_window', 'hierarchical'],
+             'desc': 'Splits where the meaning changes: it embeds every sentence and starts a new chunk at the biggest jumps in similarity. Needs one embedding per sentence while indexing. Chunk size and overlap do not apply.'},
             {'id': 'hierarchical', 'label': 'Hierarchical chunking', 'impl': False, 'incompat': ['fixed_size', 'sent_window', 'semantic_chunk'],
              'desc': 'Creates chunks at multiple granularity levels (parent + child nodes).'},
         ],
@@ -132,8 +141,9 @@ SECTIONS = [
     },
 ]
 
-# Techniques that are always on and cannot be toggled
-DEFAULT_TECHS = ['vector_index', 'vec_retriever', 'fixed_size']
+# Techniques that are always on and cannot be toggled. (vector_index and fixed_size are not: they are the 'fallback' of
+# their sections, selected whenever no other technique of the section is.)
+DEFAULT_TECHS = ['vec_retriever']
 
 # retrieval_mode -> techniques shown as selected when an agent is saved with that mode
 MODE_TECHS = {

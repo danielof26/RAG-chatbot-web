@@ -52,3 +52,12 @@ def test_every_implemented_retrieval_technique_has_a_mode_entry():
     for tech in RETRIEVAL_TECHS:
         assert TECHS[tech]['impl'], tech
         assert tech in CATALOG['mode_techs']
+
+
+@pytest.mark.parametrize('section', [s for s in CATALOG['sections'] if s.get('config_key')], ids=lambda s: s['id'])
+def test_a_choose_one_section_is_saved_as_one_value_and_its_techniques_exclude_each_other(section):
+    ids = [t['id'] for t in section['techniques']]
+    assert section['fallback'] in ids and TECHS[section['fallback']]['impl']
+    assert section['fallback'] not in CATALOG['default_techs']      # selectable like the others; the fallback applies when none is
+    for a, b in itertools.combinations(ids, 2):
+        assert locked(a, b), f'{a} and {b} are saved under one key, so they cannot be selected together'

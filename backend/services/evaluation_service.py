@@ -16,7 +16,7 @@ from services.rag_config import RagConfig
 from services.llm_providers import OllamaProvider, get_provider
 from services.rag_engine import run_rag, setup_rag
 from services.job_state import fail_run, finish_run
-from services.rag_service import invalidate_bm25_cache
+from services.rag_service import invalidate_collection_caches
 from upload_policy import MAX_DATASET_BYTES, MAX_DATASET_QUESTIONS
 
 # Runs in parallel (the spaCy and BERTScore models are loaded once and shared). More than this would
@@ -195,6 +195,8 @@ def _build_query_engine(run_id: str, agent: dict, snapshot: dict, file_paths: li
         prompt=agent.get('prompt', ''),
         chunk_size=rag_config.chunk_size,
         chunk_overlap=rag_config.chunk_overlap,
+        chunk_strategy=rag_config.chunk_strategy,
+        index_type=rag_config.index_type,
         top_k=rag_config.similarity_top_k,
         temperature=rag_config.temperature,
         synthesis_mode=rag_config.synthesis_mode,
@@ -295,7 +297,7 @@ def _cleanup_eval_collection(run_id: str):
         client = chromadb.PersistentClient(path=config.CHROMA_PATH)
     except Exception:
         return
-    invalidate_bm25_cache(f'eval_{run_id}')
+    invalidate_collection_caches(f'eval_{run_id}')
     for name in (f'eval_{run_id}', f'eval_{run_id}_raptor'):
         try:
             client.delete_collection(name)

@@ -1,6 +1,5 @@
 from llama_index.core import VectorStoreIndex, Settings, SimpleDirectoryReader, StorageContext
 from llama_index.core.indices.prompt_helper import ChatPromptHelper, PromptHelper
-from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.postprocessor import SimilarityPostprocessor
 from llama_index.core.postprocessor import SentenceTransformerRerank
 from llama_index.core.postprocessor import LongContextReorder
@@ -15,6 +14,9 @@ from llama_index.vector_stores.chroma import ChromaVectorStore
 import config
 from services.llm_providers import CONTEXT_WINDOW, get_provider
 from services.query_strategies import get_query_strategy
+from services.collection_cache import CollectionCache
+from services.index_types import DEFAULT_INDEX_TYPE, build_index, build_index_engine
+from services.chunking import DEFAULT_CHUNK_STRATEGY, build_node_parser, query_postprocessors
 from services.rag_config import RagConfig
 
 
@@ -119,7 +121,7 @@ def _get_chroma_store(agent_id: str):
 
 
 def index_document(agent_id: str, file_path: str, embed_model: str = None, embed_server_id: str = None,
-                    chunk_size: int = None, chunk_overlap: int = None):
+                    chunk_size: int = None, chunk_overlap: int = None, chunk_strategy: str = None):
     """
     Indexa un documento en la colección ChromaDB del agente.
     Se puede llamar varias veces para añadir más documentos.
@@ -133,10 +135,8 @@ def index_document(agent_id: str, file_path: str, embed_model: str = None, embed
 
     documents = SimpleDirectoryReader(input_files=[file_path]).load_data()
 
-    splitter = SentenceSplitter(
-        chunk_size=chunk_size or 512,
-        chunk_overlap=chunk_overlap or 50
-    )
+    splitter = build_node_parser(chunk_strategy or DEFAULT_CHUNK_STRATEGY, chunk_size or 512, chunk_overlap or 50,
+                                 models.embed_model)
     try:
         VectorStoreIndex.from_documents(
             documents,
@@ -310,52 +310,41 @@ def _build_raptor_engine(collection_key: str, chroma_collection, llm, embed_mode
 
 
 
-# Building the BM25 index tokenizes every chunk of the collection, so it is cached per collection and
-# reused across requests. An entry is valid while the collection keeps the same number of chunks, and
-# is dropped explicitly whenever documents are added or removed (invalidate_derived_indexes).
-_BM25_CACHE_MAX = 32
-_bm25_cache = {}      # collection name -> (chunk count, BM25Retriever)
-_bm25_lock = threading.Lock()
+# The chunks of a collection are turned into derived structures (BM25 index, keyword table, ...), which are
+# cached per collection: see CollectionCache.
+_derived_cache = CollectionCache()
+
+
+def _collection_nodes(chroma_collection) -> list:
+    """The chunks stored in a ChromaDB collection, as TextNodes."""
+    from llama_index.core.schema import TextNode
+    raw = chroma_collection.get(include=['documents', 'metadatas'])
+    return [TextNode(text=doc, **_rebuilt_node_fields(meta)) for doc, meta in zip(raw['documents'], raw['metadatas'])]
 
 
 def _build_bm25_base(chroma_collection):
     from llama_index.retrievers.bm25 import BM25Retriever
-    from llama_index.core.schema import TextNode
-
-    raw = chroma_collection.get(include=['documents', 'metadatas'])
-    nodes = [
-        TextNode(text=doc, **_rebuilt_node_fields(meta))
-        for doc, meta in zip(raw['documents'], raw['metadatas'])
-    ]
+    nodes = _collection_nodes(chroma_collection)
     return BM25Retriever.from_defaults(nodes=nodes, similarity_top_k=max(len(nodes), 1))
 
 
 def _build_bm25_retriever(chroma_collection, top_k: int):
     """Sparse/keyword retriever (term frequency, no embeddings) over the chunks already in ChromaDB."""
-    name, count = chroma_collection.name, chroma_collection.count()
-    with _bm25_lock:
-        cached = _bm25_cache.get(name)
-        if cached is None or cached[0] != count:
-            _bm25_cache.pop(name, None)
-            if len(_bm25_cache) >= _BM25_CACHE_MAX:
-                _bm25_cache.pop(next(iter(_bm25_cache)))
-            cached = (count, _build_bm25_base(chroma_collection))
-            _bm25_cache[name] = cached
+    base = _derived_cache.get(chroma_collection, 'bm25', lambda: _build_bm25_base(chroma_collection))
     # Per-request shallow copy: shares the (read-only) index but has its own top_k.
-    retriever = copy.copy(cached[1])
+    retriever = copy.copy(base)
     retriever.similarity_top_k = max(1, min(top_k, int(retriever.bm25.scores['num_docs'])))
     return retriever
 
 
-def invalidate_bm25_cache(collection_name: str):
-    with _bm25_lock:
-        _bm25_cache.pop(collection_name, None)
+def invalidate_collection_caches(collection_name: str):
+    _derived_cache.invalidate(collection_name)
 
 
 def invalidate_derived_indexes(agent_id: str):
-    """Drops what is derived from the agent's chunks (BM25 index, RAPTOR tree) after its documents change.
+    """Drops what is derived from the agent's chunks (BM25 index, keyword/summary index, RAPTOR tree) after its documents change.
     Both are rebuilt lazily by the next query that needs them."""
-    invalidate_bm25_cache(f"agent_{agent_id}")
+    invalidate_collection_caches(f"agent_{agent_id}")
     try:
         chromadb.PersistentClient(path=config.CHROMA_PATH).delete_collection(f"agent_{agent_id}_raptor")
     except Exception:
@@ -431,6 +420,7 @@ class EngineContext:
     synthesis_mode: str = 'compact'
     postprocessors: list = field(default_factory=list)
     streaming: bool = False
+    index_type: str = DEFAULT_INDEX_TYPE
 
 
 RERANK_MODEL = 'cross-encoder/ms-marco-MiniLM-L-6-v2'
@@ -447,8 +437,9 @@ def _get_reranker(top_n):
     return _reranker_base.model_copy(update={'top_n': top_n})
 
 
-def build_postprocessors(similarity_cutoff=None, rerank=False, rerank_top_n=3, long_reorder=False) -> list:
-    postprocessors = []
+def build_postprocessors(similarity_cutoff=None, rerank=False, rerank_top_n=3, long_reorder=False,
+                         chunk_strategy=DEFAULT_CHUNK_STRATEGY) -> list:
+    postprocessors = query_postprocessors(chunk_strategy)
     if similarity_cutoff:
         postprocessors.append(SimilarityPostprocessor(similarity_cutoff=similarity_cutoff))
     if rerank:
@@ -510,7 +501,18 @@ def _vector_engine(ctx):
                                      node_postprocessors=ctx.postprocessors, streaming=ctx.streaming)
 
 
+def _index_type_engine(ctx):
+    """Engine over a non-vector index (keyword table, summary...), built from the collection's chunks."""
+    index = _derived_cache.get(ctx.chroma_collection, ctx.index_type,
+                               lambda: build_index(ctx.index_type, _collection_nodes(ctx.chroma_collection)))
+    return build_index_engine(ctx.index_type, index, ctx.llm, ctx.top_k, ctx.synthesis_mode, ctx.postprocessors, ctx.streaming)
+
+
 def build_query_engine(retrieval_mode: str, ctx: EngineContext):
+    # A non-vector index brings its own retriever: the retrieval techniques that need the vector index are
+    # locked against it in the catalog, and validate_rag_config refuses the combination.
+    if ctx.index_type != DEFAULT_INDEX_TYPE:
+        return _index_type_engine(ctx)
     return _ENGINE_BUILDERS.get(retrieval_mode, _vector_engine)(ctx)
 
 
@@ -559,8 +561,9 @@ def query_agent(agent_id: str, question: str, agent_config: dict, chat_history: 
         multi_query_num=rag_config.multi_query_num_queries,
         synthesis_mode=rag_config.synthesis_mode,
         postprocessors=build_postprocessors(rag_config.effective_cutoff, rag_config.rerank,
-                                            rag_config.rerank_top_n, rag_config.long_reorder),
+                                            rag_config.rerank_top_n, rag_config.long_reorder, rag_config.chunk_strategy),
         streaming=False,
+        index_type=rag_config.index_type,
     )
     query_engine = build_query_engine(retrieval_mode, ctx)
     strategy = get_query_strategy(retrieval_mode)
@@ -611,8 +614,9 @@ def stream_query_agent(agent_id: str, question: str, agent_config: dict, chat_hi
         multi_query_num=rag_config.multi_query_num_queries,
         synthesis_mode=rag_config.synthesis_mode,
         postprocessors=build_postprocessors(rag_config.effective_cutoff, rag_config.rerank,
-                                            rag_config.rerank_top_n, rag_config.long_reorder),
+                                            rag_config.rerank_top_n, rag_config.long_reorder, rag_config.chunk_strategy),
         streaming=True,
+        index_type=rag_config.index_type,
     )
     query_engine = build_query_engine(retrieval_mode, ctx)
     strategy = get_query_strategy(retrieval_mode)
@@ -658,4 +662,4 @@ def delete_agent_collection(agent_id: str):
             db.delete_collection(name)
         except Exception:
             pass
-    invalidate_bm25_cache(f"agent_{agent_id}")
+    invalidate_collection_caches(f"agent_{agent_id}")

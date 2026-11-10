@@ -33,7 +33,8 @@ def _index_in_background(agent_id, file_path, embed_model, embed_server_id, rag_
             embed_model=embed_model,
             embed_server_id=embed_server_id,
             chunk_size=rag_config.get('chunk_size'),
-            chunk_overlap=rag_config.get('chunk_overlap')
+            chunk_overlap=rag_config.get('chunk_overlap'),
+            chunk_strategy=rag_config.get('chunk_strategy')
         )
         set_document_status(agent_id, filename, DocumentStatus.INDEXED)
     except Exception as e:

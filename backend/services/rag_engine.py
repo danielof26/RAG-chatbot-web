@@ -1,7 +1,8 @@
 import chromadb
 from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, StorageContext
-from llama_index.core.node_parser import SentenceSplitter
 from llama_index.vector_stores.chroma import ChromaVectorStore
+from services.chunking import DEFAULT_CHUNK_STRATEGY, build_node_parser
+from services.index_types import DEFAULT_INDEX_TYPE
 from services.query_strategies import get_query_strategy, _clean_answer
 from services.xai import XAIDecorator, _write_xai_trace
 from services.rag_service import EngineContext, build_postprocessors, build_query_engine
@@ -10,7 +11,8 @@ from services.rag_service import EngineContext, build_postprocessors, build_quer
 def setup_rag(llm_provider, embed_provider, model_name, embed_model, file_paths, chroma_path, chroma_col,
               prompt, chunk_size=1024, chunk_overlap=200, top_k=15, temperature=0.1, synthesis_mode='compact',
               similarity_cutoff=None, rerank=False, rerank_top_n=3, retrieval_mode='naive',
-              fusion_num_queries=1, multi_query_num_queries=3, long_reorder=False):
+              fusion_num_queries=1, multi_query_num_queries=3, long_reorder=False,
+              chunk_strategy=DEFAULT_CHUNK_STRATEGY, index_type=DEFAULT_INDEX_TYPE):
     """
     Initialises the LLM, embedding model, ChromaDB vector store and LlamaIndex query engine.
     Dispatches on retrieval_mode using the same engine builders as rag_service.py (chat path),
@@ -28,7 +30,7 @@ def setup_rag(llm_provider, embed_provider, model_name, embed_model, file_paths,
 
     if chroma_collection.count() == 0:
         documents = SimpleDirectoryReader(input_files=file_paths).load_data()
-        splitter  = SentenceSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        splitter  = build_node_parser(chunk_strategy, chunk_size, chunk_overlap, embedder)
         index = VectorStoreIndex.from_documents(documents, storage_context=storage_context, transformations=[splitter], embed_model=embedder)
     else:
         index = VectorStoreIndex.from_vector_store(vector_store, embed_model=embedder, storage_context=storage_context)
@@ -36,7 +38,8 @@ def setup_rag(llm_provider, embed_provider, model_name, embed_model, file_paths,
     ctx = EngineContext(
         index=index, chroma_collection=chroma_collection, llm=llm, embed_model=embedder, collection_key=chroma_col,
         top_k=top_k, top_q=fusion_num_queries, multi_query_num=multi_query_num_queries, synthesis_mode=synthesis_mode,
-        postprocessors=build_postprocessors(similarity_cutoff, rerank, rerank_top_n, long_reorder),
+        postprocessors=build_postprocessors(similarity_cutoff, rerank, rerank_top_n, long_reorder, chunk_strategy),
+        index_type=index_type,
     )
     query_engine = build_query_engine(retrieval_mode, ctx)
     return query_engine, llm
