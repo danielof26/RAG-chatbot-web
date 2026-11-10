@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  EMPTY_CATALOG, blockedTechsFor, computeRetrievalMode, computeSynthesisMode, initTechsFromMode, techsFromRagConfig,
+  EMPTY_CATALOG, blockedTechsFor, computeRetrievalMode, computeSectionChoices, computeSynthesisMode, initTechsFromMode,
+  techsFromRagConfig, toggleTechSet,
 } from './techniques'
 
 // A small catalog with the same shape the backend serves (backend/rag_catalog.py)
@@ -76,5 +77,54 @@ describe('mode helpers', () => {
 
   it('an empty catalog does not crash and falls back to naive', () => {
     expect([...techsFromRagConfig(EMPTY_CATALOG, {})]).toEqual(['naive'])
+  })
+})
+
+// A "choose one" section (chunking): saved under its config_key, falling back to its default
+describe('single-choice sections', () => {
+  const chunkCatalog = {
+    ...catalog,
+    sections: [
+      ...catalog.sections,
+      { id: 'chunk', config_key: 'chunk_strategy', fallback: 'fixed', techniques: [
+        { id: 'fixed', impl: true, incompat: ['window'] },
+        { id: 'window', impl: true, incompat: ['fixed'] },
+        { id: 'soon', impl: false, incompat: [] },
+      ] },
+    ],
+  }
+
+  it('selects the saved choice, or the fallback when there is none or it is unknown', () => {
+    expect(techsFromRagConfig(chunkCatalog, { chunk_strategy: 'window' }).has('window')).toBe(true)
+    expect(techsFromRagConfig(chunkCatalog, { chunk_strategy: 'window' }).has('fixed')).toBe(false)
+    for (const cfg of [{}, { chunk_strategy: 'gone' }]) {
+      expect(techsFromRagConfig(chunkCatalog, cfg).has('fixed')).toBe(true)
+    }
+  })
+
+  it('computeSectionChoices reads the selection back, and the fallback when nothing is selected', () => {
+    expect(computeSectionChoices(chunkCatalog, new Set(['window']))).toEqual({ chunk_strategy: 'window' })
+    expect(computeSectionChoices(chunkCatalog, new Set())).toEqual({ chunk_strategy: 'fixed' })
+    expect(computeSectionChoices(catalog, new Set(['window']))).toEqual({})
+  })
+
+  it('does not lock the other choices of the section, but still locks what the selected one forbids elsewhere', () => {
+    const cat = { ...chunkCatalog, sections: [chunkCatalog.sections[0],
+      { ...chunkCatalog.sections[1], techniques: [
+        { id: 'fixed', impl: true, incompat: ['window', 'crag'] }, { id: 'window', impl: true, incompat: ['fixed'] }] }] }
+    expect(blockedTechsFor(cat, new Set(['fixed']))).toEqual(new Set(['crag']))
+  })
+
+  it('choosing another replaces the current one, and unchoosing it goes back to the fallback', () => {
+    const fixed = new Set(['naive', 'fixed'])
+    const window = toggleTechSet(chunkCatalog, fixed, 'window')
+    expect([...window].sort()).toEqual(['naive', 'window'])
+    expect([...toggleTechSet(chunkCatalog, window, 'window')].sort()).toEqual(['fixed', 'naive'])
+  })
+
+  it('clicking the selected fallback, or a technique that is not implemented, changes nothing', () => {
+    const fixed = new Set(['naive', 'fixed'])
+    expect(toggleTechSet(chunkCatalog, fixed, 'fixed')).toBe(fixed)
+    expect(toggleTechSet(chunkCatalog, fixed, 'soon')).toBe(fixed)
   })
 })

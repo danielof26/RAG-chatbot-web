@@ -18,4 +18,9 @@ describe('configTags', () => {
     const tags = configTags({ retrieval_mode: 'naive', rerank: false, sim_filter: false, xai: false })
     expect(tags).toEqual(['indexing: vector store', 'chunking: fixed-size', 'retrieval: naive'])
   })
+
+  it('shows the chosen indexing and chunking, and the chunk size only for fixed-size chunks', () => {
+    const tags = configTags({ retrieval_mode: 'naive', index_type: 'keyword_index', chunk_strategy: 'sent_window', chunk_size: 512, chunk_overlap: 50 })
+    expect(tags).toEqual(['indexing: keyword table', 'chunking: sent-window', 'retrieval: naive'])
+  })
 })

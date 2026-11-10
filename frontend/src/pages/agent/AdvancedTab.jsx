@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { techsFromRagConfig, computeRetrievalMode, computeSynthesisMode, blockedTechsFor, toggleTechSet } from '../../rag/techniques'
+import { techsFromRagConfig, computeRetrievalMode, computeSynthesisMode, computeSectionChoices, blockedTechsFor, toggleTechSet } from '../../rag/techniques'
 
 export default function AdvancedTab({ agent, id, api, catalog, llmServers }) {
   const [topK, setTopK] = useState(agent.rag_config?.similarity_top_k ?? 5)
@@ -26,6 +26,7 @@ export default function AdvancedTab({ agent, id, api, catalog, llmServers }) {
           similarity_top_k: Number(topK),
           chunk_size: Number(chunkSize),
           chunk_overlap: Number(chunkOverlap),
+          ...computeSectionChoices(catalog, selectedTechs),
           temperature: Number(temperature),
           retrieval_mode: computeRetrievalMode(catalog, selectedTechs),
           synthesis_mode: computeSynthesisMode(catalog, selectedTechs),
@@ -203,8 +204,8 @@ export default function AdvancedTab({ agent, id, api, catalog, llmServers }) {
             </div>
           )}
 
-          {/* Chunking: chunk size + overlap */}
-          {section.id === 'chunk' && (
+          {/* Chunking: chunk size + overlap (only the fixed-size strategy uses them) */}
+          {section.id === 'chunk' && selectedTechs.has('fixed_size') && (
             <div className="space-y-3 pt-1 border-t border-gray-50">
               <div className="mt-3">
                 <label htmlFor="chunk-size-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Chunk size</label>

@@ -15,7 +15,10 @@ export const initTechsFromMode = (catalog, mode) => {
 export const blockedTechsFor = (catalog, selectedTechs) => {
   const blocked = new Set()
   catalog.sections.forEach(s => s.techniques.forEach(t => {
-    if (selectedTechs.has(t.id)) t.incompat.forEach(id => blocked.add(id))
+    if (!selectedTechs.has(t.id)) return
+    // Within a "choose one" section the others are not blocked: choosing one replaces the current one
+    const sameSection = new Set(s.config_key ? s.techniques.map(x => x.id) : [])
+    t.incompat.forEach(id => { if (!sameSection.has(id)) blocked.add(id) })
   }))
   return blocked
 }
@@ -34,8 +37,20 @@ export const techsFromRagConfig = (catalog, ragConfig) => {
   if (cfg.rerank)       addIfAllowed('rerank_ce')
   if (cfg.xai)          addIfAllowed('xai')
   if (cfg.long_reorder) addIfAllowed('long_reorder')
+  singleChoiceSections(catalog).forEach(s => {
+    const saved = s.techniques.find(t => t.id === cfg[s.config_key])
+    techs.add(saved ? saved.id : s.fallback)
+  })
   return techs
 }
+
+// "Choose one" sections (chunking, ...) are saved as one rag_config value named by the section's config_key:
+// the selected technique, or the section's fallback when none is selected.
+const singleChoiceSections = (catalog) => catalog.sections.filter(s => s.config_key)
+
+export const computeSectionChoices = (catalog, techs) =>
+  Object.fromEntries(singleChoiceSections(catalog).map(s =>
+    [s.config_key, s.techniques.find(t => techs.has(t.id))?.id ?? s.fallback]))
 
 export const computeRetrievalMode = (catalog, techs) =>
   catalog.mode_priority.find(mode => techs.has(mode)) ?? 'naive'
@@ -56,8 +71,13 @@ export const toggleTechSet = (catalog, selectedTechs, techId) => {
   if (catalog.default_techs.includes(techId)) return selectedTechs
   const tech = findTech(catalog, techId)
   if (!tech?.impl) return selectedTechs
+  const section = catalog.sections.find(s => s.techniques.includes(tech))
   const next = new Set(selectedTechs)
-  if (next.has(techId)) { next.delete(techId) }
+  if (next.has(techId)) {
+    if (section.fallback === techId) return selectedTechs     // the fallback can only be left by choosing another
+    next.delete(techId)
+    if (section.fallback) next.add(section.fallback)          // a "choose one" group never ends up empty
+  }
   else { tech.incompat.forEach(id => next.delete(id)); next.add(techId) }
   return next
 }

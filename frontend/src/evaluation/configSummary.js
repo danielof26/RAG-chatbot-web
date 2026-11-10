@@ -3,14 +3,14 @@
 // Optional settings only appear when active; `true` flags are shown by name only.
 // Conversational memory is left out on purpose: evaluations ask each question on its own, so it has no effect.
 
-// Not stored in rag_config: they have a single implementation today (the other options are still "soon").
-const INDEXING = 'vector store'
-const CHUNKING = 'fixed-size'
+const INDEX_LABELS = { vector_index: 'vector store', keyword_index: 'keyword table', summary_index: 'summary' }
+const indexing = (cfg) => INDEX_LABELS[cfg.index_type ?? 'vector_index'] ?? cfg.index_type
+const chunking = (cfg) => (cfg.chunk_strategy ?? 'fixed_size').replace('_', '-')
 
 export const configEntries = (cfg = {}, { llmModel, embedModel } = {}) => [
-  ['indexing', INDEXING],
-  ['chunking', CHUNKING],
-  cfg.chunk_size != null && ['chunk', `${cfg.chunk_size}/${cfg.chunk_overlap ?? 0}`],
+  ['indexing', indexing(cfg)],
+  ['chunking', chunking(cfg)],
+  (cfg.chunk_strategy ?? 'fixed_size') === 'fixed_size' && cfg.chunk_size != null && ['chunk', `${cfg.chunk_size}/${cfg.chunk_overlap ?? 0}`],
   ['retrieval', cfg.retrieval_mode],
   cfg.retrieval_mode === 'fusion' && cfg.fusion_num_queries != null && ['fusion_queries', cfg.fusion_num_queries],
   cfg.retrieval_mode === 'multi_query' && cfg.multi_query_num_queries != null && ['multi_query_queries', cfg.multi_query_num_queries],
