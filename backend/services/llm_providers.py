@@ -5,24 +5,35 @@ import requests
 from llama_index.core.bridge.pydantic import PrivateAttr
 from llama_index.core.embeddings import BaseEmbedding
 from llama_index.llms.ollama import Ollama
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from services.secrets_box import decrypt
 
 CONTEXT_WINDOW = 8000  # tokens, for the Ollama and OpenAI-like LLMs
+
+# Rate-limited / overloaded embedding servers answer 429/5xx: retry with exponential backoff
+# (honouring the Retry-After header) instead of failing a whole evaluation on one request.
+_EMBEDDING_RETRY = Retry(total=6, backoff_factor=2, status_forcelist=(429, 502, 503, 504),
+                         allowed_methods=frozenset({'POST'}), respect_retry_after_header=True)
 
 
 class _FlexOpenAIEmbedding(BaseEmbedding):
     """Embedding for OpenAI-compatible APIs — accepts any model name without validation."""
     _base_url: str = PrivateAttr()
     _headers: Any = PrivateAttr()
+    _session: Any = PrivateAttr()
 
     def __init__(self, model: str, api_key: str, api_base: str, **kwargs):
         super().__init__(model_name=model, **kwargs)
         self._base_url = (api_base if api_base.endswith('/v1') else f"{api_base}/v1") + '/embeddings'
         self._headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
+        self._session = requests.Session()
+        self._session.mount('http://', HTTPAdapter(max_retries=_EMBEDDING_RETRY))
+        self._session.mount('https://', HTTPAdapter(max_retries=_EMBEDDING_RETRY))
 
     def _embed(self, text: str) -> List[float]:
-        resp = requests.post(
+        resp = self._session.post(
             self._base_url,
             headers=self._headers,
             json={'model': self.model_name, 'input': text},
