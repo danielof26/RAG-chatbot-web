@@ -150,7 +150,7 @@ export default function AdvancedTab({ agent, id, api, catalog, llmServers }) {
               <label htmlFor="fusion-num-queries-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 mt-3">Query Variants (top_q)</label>
               <input
                 id="fusion-num-queries-input"
-                type="number" min="1" max="8"
+                type="number" min="1" max="10"
                 value={fusionNumQueries}
                 onChange={e => setFusionNumQueries(e.target.value)}
                 className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
@@ -180,7 +180,7 @@ export default function AdvancedTab({ agent, id, api, catalog, llmServers }) {
               <label htmlFor="rerank-top-n-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 mt-3">Reranker top N</label>
               <input
                 id="rerank-top-n-input"
-                type="number" min="1" max="20"
+                type="number" min="1" max="50"
                 value={rerankTopN}
                 onChange={e => setRerankTopN(e.target.value)}
                 className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
@@ -211,7 +211,7 @@ export default function AdvancedTab({ agent, id, api, catalog, llmServers }) {
                 <label htmlFor="chunk-size-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Chunk size</label>
                 <input
                   id="chunk-size-input"
-                  type="number" min="50" max="8000"
+                  type="number" min="64" max="8192"
                   value={chunkSize}
                   onChange={e => setChunkSize(e.target.value)}
                   className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
@@ -222,7 +222,7 @@ export default function AdvancedTab({ agent, id, api, catalog, llmServers }) {
                 <label htmlFor="chunk-overlap-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Chunk overlap</label>
                 <input
                   id="chunk-overlap-input"
-                  type="number" min="0" max="4000"
+                  type="number" min="0" max="2048"
                   value={chunkOverlap}
                   onChange={e => setChunkOverlap(e.target.value)}
                   className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
@@ -307,7 +307,7 @@ export default function AdvancedTab({ agent, id, api, catalog, llmServers }) {
               <label htmlFor="conv-memory-turns" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Turns to remember</label>
               <input
                 id="conv-memory-turns"
-                type="number" min="1" max="10"
+                type="number" min="1" max="20"
                 value={convMemoryTurns}
                 onChange={e => setConvMemoryTurns(e.target.value)}
                 className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
