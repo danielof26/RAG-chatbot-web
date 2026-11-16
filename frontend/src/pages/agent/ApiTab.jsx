@@ -22,13 +22,31 @@ export default function ApiTab({ id, api, active, apiKeyRequired, setApiKeyRequi
     await fetchApiKeys()
   }
 
+  // navigator.clipboard solo existe en contextos seguros (HTTPS/localhost);
+  // en HTTP se usa el método clásico con un textarea temporal.
+  const copyText = async (text) => {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return
+    }
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    if (!ok) throw new Error('copy failed')
+  }
+
   const handleCopyKey = async () => {
     try {
-      await navigator.clipboard.writeText(createdKey.key)
+      await copyText(createdKey.key)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {
-      // Sin permiso de portapapeles (p. ej. HTTP no seguro): el usuario aún puede seleccionarla a mano
+      // El usuario aún puede seleccionarla a mano
     }
   }
 
