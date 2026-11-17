@@ -17,6 +17,7 @@ export default function EvaluationTab({ id, api, active }) {
   const [chartHoveredIdx, setChartHoveredIdx] = useState(null)
   const [downloadRunTarget, setDownloadRunTarget] = useState(null)
   const evalFileRef = useRef()
+  const [evalFileName, setEvalFileName] = useState('')
 
   const fetchSnapshots = async () => {
     const res = await api.get(`/api/agents/${id}/config-snapshots`)
@@ -60,6 +61,7 @@ export default function EvaluationTab({ id, api, active }) {
     setEvalMsg(res.ok ? 'Evaluation started — it will appear below once finished.' : (data.error || 'Error starting evaluation'))
     if (res.ok) {
       evalFileRef.current.value = ''
+      setEvalFileName('')
       await fetchEvalRuns()
     }
   }
@@ -177,14 +179,25 @@ export default function EvaluationTab({ id, api, active }) {
 
           <div>
             <label htmlFor="eval-csv-input" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Questions dataset (.csv or .xlsx)</label>
-            <input
-              id="eval-csv-input"
-              type="file"
-              accept=".csv,.xlsx"
-              ref={evalFileRef}
-              required
-              className="w-full text-sm"
-            />
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => evalFileRef.current.click()}
+                className="bg-orange-400 hover:bg-orange-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
+              >
+                Choose file
+              </button>
+              <span className="text-sm text-gray-500 truncate">{evalFileName || 'No file selected'}</span>
+              <input
+                id="eval-csv-input"
+                type="file"
+                accept=".csv,.xlsx"
+                ref={evalFileRef}
+                onChange={e => setEvalFileName(e.target.files[0]?.name || '')}
+                required
+                className="sr-only"
+              />
+            </div>
             <p className="text-xs text-gray-400 mt-1">
               Columns: Question, Keywords and Answer (Answer is optional), in any order. A .csv can use semicolons or commas; an .xlsx is converted automatically (first sheet, same columns).
             </p>
